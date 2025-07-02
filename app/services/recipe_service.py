@@ -1,16 +1,19 @@
 from typing import Optional, Sequence
 from uuid import UUID
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.recipe_repo import RecipeCRUD
+from app.db.session import get_session
+
 from app.models.recipe import Recipe  # 导入 Recipe ORM 模型
 # 注意：确保 RecipeCreate 和 RecipeUpdate 是从正确的文件导入的
 from app.schemas.recipe_schemas import RecipeCreate, RecipeUpdate
 
 
 class RecipeService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession = Depends(get_session)):
         self.session = session
         self.recipe_repo = RecipeCRUD(session)
 
