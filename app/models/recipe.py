@@ -1,23 +1,11 @@
 from typing import Optional, List
-from datetime import datetime
 import uuid
 
 from sqlmodel import SQLModel, Field, Relationship
 from app.models._model_utils.guid import GUID
+from app.models.base.base_model import BaseModel
 
-# === 基础模型 ===
-class BaseModel(SQLModel):
-    id: uuid.UUID = Field(default_factory=GUID.generate, sa_type=GUID(), primary_key=True, index=True)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-    created_by: Optional[uuid.UUID] = Field(default=None, sa_type=GUID(), index=True)
-    updated_by: Optional[uuid.UUID] = Field(default=None, sa_type=GUID(), index=True)
-
-    is_deleted: bool = Field(default=False, index=True)
-    deleted_at: Optional[datetime] = None
-    deleted_by: Optional[uuid.UUID] = Field(default=None, sa_type=GUID(), index=True)
 
 
 # === 标签 Tag ===
