@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Sequence, Optional, List
 from uuid import UUID
 
@@ -64,7 +64,7 @@ class RecipeCRUD:
         创建一个新菜谱，并处理其标签和配料关联。
         接收 RecipeCreate Pydantic 模型作为输入。
         """
-        now = datetime.utcnow()
+        now = datetime.utcnow
         recipe = Recipe(
             title=recipe_data.title,
             description=recipe_data.description,
@@ -104,7 +104,7 @@ class RecipeCRUD:
         for key, value in update_attrs.items():
             setattr(recipe, key, value)
 
-        recipe.updated_at = datetime.utcnow()
+        # recipe.updated_at = datetime.utcnow
         self.session.add(recipe)  # 将修改后的对象标记为脏，以便保存
 
         # 处理标签更新
@@ -129,7 +129,7 @@ class RecipeCRUD:
         if not recipe:
             return None
 
-        now = datetime.utcnow()
+        now = datetime.utcnow
         recipe.is_deleted = True
         recipe.deleted_at = now
         recipe.updated_at = now
