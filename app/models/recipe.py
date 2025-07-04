@@ -3,13 +3,13 @@ import uuid
 
 from sqlmodel import SQLModel, Field, Relationship
 from app.models._model_utils.guid import GUID
-from app.models.base.base_model import BaseModel
+from app.models.base.base_model import BaseModel, AutoTableNameMixin
 
 
 
 
 # === 标签 Tag ===
-class RecipeTagLink(SQLModel, table=True):
+class RecipeTagLink(AutoTableNameMixin, SQLModel,  table=True):
     recipe_id: uuid.UUID = Field(foreign_key="recipe.id", primary_key=True, sa_type=GUID())
     tag_id: uuid.UUID = Field(foreign_key="tag.id", primary_key=True, sa_type=GUID())
 
@@ -37,7 +37,7 @@ class Ingredient(BaseModel, table=True):
 
 
 # === 菜谱中的配料 RecipeIngredient（中间表）===
-class RecipeIngredient(SQLModel, table=True):
+class RecipeIngredient(AutoTableNameMixin, SQLModel,  table=True):
     id: uuid.UUID = Field(default_factory=GUID.generate, sa_type=GUID(), primary_key=True)
 
     recipe_id: uuid.UUID = Field(foreign_key="recipe.id", sa_type=GUID())
