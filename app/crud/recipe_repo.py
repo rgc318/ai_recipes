@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
-from typing import Sequence, Optional, List
+from typing import Sequence, Optional, List, Union
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import delete
-
+from pydantic import BaseModel as PydanticBaseModel
 # 确保导入了所有关联模型
 from app.models.recipe import (
     Recipe,
@@ -59,33 +59,29 @@ class RecipeCRUD:
         return result.scalar_one_or_none()
 
     # --- 核心修改在这里：将 recipe 参数类型改为 RecipeCreate ---
-    async def create(self, recipe_data: RecipeCreate) -> Recipe:
-        """
-        创建一个新菜谱，并处理其标签和配料关联。
-        接收 RecipeCreate Pydantic 模型作为输入。
-        """
-        now = datetime.utcnow
+    async def create(self, recipe_data: Union[RecipeCreate, dict]) -> Recipe:
+        now = datetime.utcnow()
+
+        if isinstance(recipe_data, PydanticBaseModel):
+            recipe_data = recipe_data.model_dump()
+
         recipe = Recipe(
-            title=recipe_data.title,
-            description=recipe_data.description,
-            steps=recipe_data.steps,
+            title=recipe_data.get("title"),
+            description=recipe_data.get("description"),
+            steps=recipe_data.get("steps"),
             created_at=now,
             updated_at=now,
-            # id 会由 default_factory 自动生成
         )
         self.session.add(recipe)
-        await self.session.flush()  # 执行 SQL 语句以获取 recipe.id，但不提交事务
+        await self.session.flush()
 
-        # 处理标签关联
-        if recipe_data.tag_ids:
-            await self._update_recipe_tags(recipe, recipe_data.tag_ids)
+        if recipe_data.get("tag_ids"):
+            await self._update_recipe_tags(recipe, recipe_data["tag_ids"])
 
-        # 处理配料关联
-        if recipe_data.ingredients:
-            await self._update_recipe_ingredients(recipe, recipe_data.ingredients)
+        if recipe_data.get("ingredients"):
+            await self._update_recipe_ingredients(recipe, recipe_data["ingredients"])
 
         await self.session.commit()
-        # 返回一个带有预加载关系的对象
         return await self.get_by_id(recipe.id)
 
     # --- update 方法也需要修改其参数类型，以接收 RecipeUpdate Pydantic 模型 ---

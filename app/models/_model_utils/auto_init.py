@@ -28,11 +28,11 @@ class AutoInitConfig(BaseModel):
 
 def _get_config(relation_cls: type[SqlAlchemyBase]) -> AutoInitConfig:
     """
-    Returns the config for the given class.
+    Returns the core for the given class.
     """
     cfg = AutoInitConfig()
     cfgKeys = cfg.model_dump().keys()
-    # Get the config for the class
+    # Get the core for the class
     try:
         class_config: ConfigDict = relation_cls.model_config
     except AttributeError:

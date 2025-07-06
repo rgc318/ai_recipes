@@ -4,10 +4,12 @@ from uuid import UUID, uuid4
 
 from sqlmodel import SQLModel, Field
 from app.models.base.base_model import BaseModel
+from app.schemas.user_schemas import UserRead
 
 
 class User(BaseModel, table=True):
     __tablename__ = "user"
+    __pydantic_model__ = UserRead
 
     username: str = Field(index=True, nullable=False, unique=True)
     email: Optional[str] = Field(default=None, index=True, unique=True)
@@ -74,3 +76,39 @@ class UserRole(BaseModel, table=True):
 class RolePermission(BaseModel, table=True):
     role_id: UUID = Field(foreign_key="role.id", primary_key=True)
     permission_id: UUID = Field(foreign_key="permission.id", primary_key=True)
+
+class UserPreference(BaseModel, table=True):
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
+    preferred_language: Optional[str] = Field(default="zh")
+    ai_style: Optional[str] = Field(default="healthy")
+    subscribe_newsletter: bool = Field(default=False)
+
+
+class UserLoginFailLog(BaseModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: Optional[UUID] = Field(default=None, foreign_key="user.id")
+    username_attempted: str
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    reason: Optional[str] = None  # 密码错误、多次失败、验证码未通过等
+    login_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VerificationCode(BaseModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    contact: str  # email 或 phone
+    code: str
+    purpose: str  # register, login, reset_password, verify
+    is_used: bool = Field(default=False)
+    expires_at: datetime
+    sent_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserActionLog(BaseModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id")
+    action: str  # e.g., "create_recipe", "delete_account"
+    target_id: Optional[UUID] = None
+    target_type: Optional[str] = None  # e.g., "Recipe", "Comment"
+    extra_data: Optional[str] = None
+    # created_at: datetime = Field(default_factory=datetime.utcnow)
