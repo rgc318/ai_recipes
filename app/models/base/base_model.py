@@ -18,7 +18,7 @@ class AutoTableNameMixin:
         print(f"Calculating tablename for {cls.__name__}: {name}")
         return camel_to_snake(cls.__name__)
 
-class BaseModel(SQLModel, AutoTableNameMixin, TimestampMixin, AuditMixin, SoftDeleteMixin):
+class BaseModel(AutoTableNameMixin, SQLModel, TimestampMixin, AuditMixin, SoftDeleteMixin):
     __abstract__ = True  # 防止BaseModel本身成为表
 
     id: uuid.UUID = Field(default_factory=GUID.generate, sa_type=GUID(), primary_key=True, index=True)

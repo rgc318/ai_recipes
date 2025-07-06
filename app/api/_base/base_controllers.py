@@ -5,7 +5,7 @@
 # from pydantic import UUID4, ConfigDict
 # from sqlalchemy.orm import Session
 #
-# from app.core.config import get_app_dirs, get_app_settings
+# from app.core.core import get_app_dirs, get_app_settings
 # from app.core.dependencies.dependencies import (
 #     get_admin_user,
 #     get_current_user,
