@@ -1,0 +1,11 @@
+minio:
+  endpoint: "play.min.io"
+  access_key: "myaccess"
+  secret_key: "mysecret"
+  bucket_name: "ai-recipes"
+  secure: true
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "debug"

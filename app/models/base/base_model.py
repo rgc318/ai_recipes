@@ -14,12 +14,18 @@ def camel_to_snake(name: str) -> str:
 class AutoTableNameMixin:
     @declared_attr
     def __tablename__(cls):
-        name = camel_to_snake(cls.__name__)
-        print(f"Calculating tablename for {cls.__name__}: {name}")
+        # name = camel_to_snake(cls.__name__)
+        # print(f"Calculating tablename for {cls.__name__}: {name}")
         return camel_to_snake(cls.__name__)
-
-class BaseModel(AutoTableNameMixin, SQLModel, TimestampMixin, AuditMixin, SoftDeleteMixin):
-    __abstract__ = True  # 防止BaseModel本身成为表
-
+class IdMixin:
     id: uuid.UUID = Field(default_factory=GUID.generate, sa_type=GUID(), primary_key=True, index=True)
+class BaseModel(
+    AutoTableNameMixin,
+    SQLModel,
+    SoftDeleteMixin,
+    TimestampMixin,
+    AuditMixin,
+    IdMixin
+):
+    __abstract__ = True
 

@@ -28,7 +28,7 @@ class User(BaseModel, table=True):
     login_count: int = Field(default=0)
 
 class UserAuth(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id")
     provider: str  # "github" / "wechat" / "apple" / "local"
     provider_user_id: str
@@ -41,21 +41,21 @@ class UserSavedRecipe(BaseModel, table=True):
     saved_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserAIHistory(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id")
     query: str
     ai_response: str
     # created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserFeedback(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id")
     content: str
     contact_email: Optional[str] = None
     # created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserLoginLog(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id")
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -85,7 +85,7 @@ class UserPreference(BaseModel, table=True):
 
 
 class UserLoginFailLog(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: Optional[UUID] = Field(default=None, foreign_key="user.id")
     username_attempted: str
     ip_address: Optional[str] = None
@@ -95,7 +95,7 @@ class UserLoginFailLog(BaseModel, table=True):
 
 
 class VerificationCode(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     contact: str  # email 或 phone
     code: str
     purpose: str  # register, login, reset_password, verify
@@ -105,7 +105,7 @@ class VerificationCode(BaseModel, table=True):
 
 
 class UserActionLog(BaseModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id")
     action: str  # e.g., "create_recipe", "delete_account"
     target_id: Optional[UUID] = None

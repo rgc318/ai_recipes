@@ -1,0 +1,164 @@
+import json
+import os
+# print(os.getcwd())
+from app.core.logger import logger
+import yaml
+import configparser
+import sys
+
+
+# 定义默认配置
+DEFAULT_CONFIG = {
+    "server": {
+        "id": 1,
+        "name": "局域网",
+        "port": 4000,
+        "directConnection": True
+    },
+    "wvp": {
+        "id": "311166",
+        "ip": "192.168.1.2",
+        "port": 18080
+    }
+}
+
+
+class Config:
+    def __init__(self, config_file='config.json'):
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # 打包后的环境：配置文件应该位于可执行文件的同一级目录
+            base_path = os.path.dirname(sys.executable)
+        else:
+            # 开发环境：配置文件位于脚本文件的上一级目录
+            base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+        self.config_file = os.path.join(base_path, config_file)
+        self._config = None
+        self.load_config()
+
+    def load_config(self):
+        """根据文件扩展名加载配置文件"""
+        if self.config_file.endswith('.json'):
+            self.load_json_config()
+        elif self.config_file.endswith('.yaml') or self.config_file.endswith('.yml'):
+            self.load_yaml_config()
+        elif self.config_file.endswith('.ini'):
+            self.load_ini_config()
+        else:
+            logger.error(f"不支持的配置文件类型: {self.config_file}")
+
+    def load_json_config(self):
+        """加载JSON配置文件到一个字典，带错误处理"""
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as file:
+                # 使用ConfigObject转换字典
+                loaded_config = json.load(file)
+                self._config = ConfigObject({**DEFAULT_CONFIG, **loaded_config})
+        except FileNotFoundError:
+            logger.warning(f"配置文件{self.config_file}未找到，将使用默认配置。")
+            self._config = ConfigObject(DEFAULT_CONFIG)
+        except json.JSONDecodeError:
+            logger.error(f"配置文件{self.config_file}格式不正确。使用默认配置。")
+            self._config = ConfigObject(DEFAULT_CONFIG)
+
+    def load_yaml_config(self):
+        """加载YAML配置文件到一个字典"""
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as file:
+                loaded_config = yaml.safe_load(file)
+                self._config = ConfigObject({**DEFAULT_CONFIG, **loaded_config})
+        except FileNotFoundError:
+            logger.warning(f"配置文件{self.config_file}未找到，将使用默认配置。")
+            self._config = ConfigObject(DEFAULT_CONFIG)
+        except yaml.YAMLError as e:
+            logger.error(f"配置文件{self.config_file}格式不正确：{e}. 使用默认配置。")
+            self._config = ConfigObject(DEFAULT_CONFIG)
+
+    def load_ini_config(self):
+        """加载INI配置文件到一个字典"""
+        config = configparser.ConfigParser()
+        found = config.read(self.config_file)
+        if not found:
+            logger.warning(f"配置文件{self.config_file}未找到，将使用默认配置。")
+            self._config = ConfigObject(DEFAULT_CONFIG)
+            return
+
+        loaded_config = {section: dict(config.items(section)) for section in config.sections()}
+        self._config = ConfigObject({**DEFAULT_CONFIG, **loaded_config})
+
+    def __getattr__(self, item):
+        """允许通过属性访问配置项"""
+        try:
+            return getattr(self._config, item)
+        except AttributeError:
+            return f"{item} 配置项不存在"
+
+    def __getitem__(self, key):
+        """允许使用字典方式访问"""
+        try:
+            return self._config.__getitem__(key)
+        except KeyError:
+            raise KeyError(f"配置项 '{key}' 不存在。")
+
+    def reload_config(self):
+        """重新加载配置文件"""
+        self.load_config()
+
+
+class ConfigObject:
+    def __init__(self, dictionary):
+        self.__dict__["_dict"] = {}
+        for key, value in dictionary.items():
+            if isinstance(value, dict):
+                self.__dict__["_dict"][key] = ConfigObject(value)
+            else:
+                self.__dict__["_dict"][key] = value
+
+    def __getattr__(self, item):
+        try:
+            return self.__dict__["_dict"][item]
+        except KeyError:
+            raise AttributeError(f"配置项 '{item}' 不存在。")
+
+    def __getitem__(self, item):
+        """允许使用字典方式访问"""
+        try:
+            return self.__getattr__(item)
+        except AttributeError:
+            raise KeyError(f"配置项 '{item}' 不存在。")
+
+    def to_dict(self):
+        """将ConfigObject转换回字典"""
+        result = {}
+        for key, value in self.__dict__["_dict"].items():
+            if isinstance(value, ConfigObject):
+                result[key] = value.to_dict()
+            else:
+                result[key] = value
+        return result
+
+
+class ConfigProperties:
+    config = Config()
+    WVP_ID = config.wvp.id
+    WVP_IP = config.wvp.ip
+    WVP_PORT = config.wvp.port
+    SERVER_ID = config.server.id
+    SERVER_NAME = config.server.name
+    SERVER_PORT = int(config.server.port)
+
+
+# 使用
+config = Config()
+c = ConfigProperties()
+
+# 使用属性访问
+# logger.info(f"Server ID: {config.server.id}")
+# logger.info(f"Server Name: {config.server.name}")
+# logger.info(f"Server Name: {config['server']['name']}")
+# logger.info(f"Server Port: {config.server.port}")
+# logger.info(f"Direct Connection: {config.server.directConnection}")
+#
+# logger.info(f"WVP ID: {config.wvp.id}")
+# logger.info(f"WVP IP: {config.wvp.ip}")
+# logger.info(f"WVP Port: {config.wvp.port}")
+# logger.info(f"WVP Port: {c.WVP_PORT}")

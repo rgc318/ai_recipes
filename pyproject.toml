@@ -10,4 +10,6 @@ dependencies = [
     "email-validator",
     "passlib",
     "bcrypt",
+    "boto3",
+    "pyyaml",
 ]
