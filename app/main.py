@@ -40,3 +40,4 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 app.include_router(api_router)
+logger.info(app.routes)

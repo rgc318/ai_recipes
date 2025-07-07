@@ -52,6 +52,12 @@ class MinioClient:
         except Exception as e:
             logger.error(f"[MinIO] Failed to check or create bucket '{bucket_name}': {e}")
 
+    def test_connection(self) -> bool:
+        try:
+            self.s3.list_buckets()
+            return True
+        except Exception:
+            return False
 
 # 单例对象
 minio_client = MinioClient()

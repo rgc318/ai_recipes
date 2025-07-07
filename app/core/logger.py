@@ -3,12 +3,13 @@ from loguru import logger
 import sys
 import os
 from pathlib import Path
+from app.config.settings import settings
 
 # 获取运行环境
 ENV = os.getenv("ENV", "development").lower()
 
 # 日志目录
-log_dir = Path("logs")
+log_dir = Path(settings.logging.log_dir)
 log_dir.mkdir(parents=True, exist_ok=True)
 
 # 日志文件路径
@@ -36,8 +37,8 @@ logger.add(
 logger.add(
     log_file_path,
     level="DEBUG",
-    rotation="10 MB",
-    retention="7 days",
+    rotation=settings.logging.rotation,
+    retention=settings.logging.retention,
     encoding="utf-8",
     enqueue=True,
     backtrace=True,
@@ -48,8 +49,8 @@ logger.add(
 logger.add(
     log_json_path,
     level="WARNING",  # 只记录警告及以上
-    rotation="1 day",
-    retention="7 days",
+    rotation=settings.logging.rotation,
+    retention=settings.logging.retention,
     serialize=True,
     encoding="utf-8",
     enqueue=True
