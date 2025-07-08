@@ -1,17 +1,18 @@
+# app/core/minio_client.py
 from uuid import uuid4
+from typing import Optional
 from fastapi import UploadFile
 from botocore.client import Config as BotoConfig
 import boto3
-from app.config.settings import settings  # 使用你的统一配置系统
+from app.config.settings import settings
 from app.core.logger import logger
 
 
 class MinioClient:
     def __init__(self):
         self.minio_conf = settings.minio
-
-        protocol = "https" if self.minio_conf.secure else "http"
-        self.endpoint_url = f"{protocol}://{self.minio_conf.endpoint}"
+        self.endpoint_url = self._get_base_url()
+        self.cdn_base_url = self.minio_conf.cdn_base_url or self.endpoint_url
 
         self.s3 = boto3.client(
             "s3",
@@ -22,24 +23,49 @@ class MinioClient:
             region_name="us-east-1",
         )
 
-        # 启动时确保 bucket 存在
         self.create_bucket_if_not_exists(self.minio_conf.bucket_name)
 
-    def upload_fileobj(self, file: UploadFile, folder: str = "images") -> str:
-        ext = file.filename.split(".")[-1]
-        object_name = f"{folder}/{uuid4().hex}.{ext}"
+    def _get_base_url(self) -> str:
+        protocol = "https" if self.minio_conf.secure else "http"
+        return f"{protocol}://{self.minio_conf.endpoint}"
 
-        logger.info(f"[MinIO] Uploading file to {self.minio_conf.bucket_name}/{object_name}")
+    def upload_fileobj(
+        self,
+        file: UploadFile,
+        folder: str = "uploads",
+        object_name: Optional[str] = None,
+    ) -> str:
+        ext = file.filename.split(".")[-1]
+        if not object_name:
+            object_name = f"{uuid4().hex}.{ext}"
+
+        key = f"{folder}/{object_name}"
+
+        logger.info(f"[MinIO] Uploading file to {self.minio_conf.bucket_name}/{key}")
 
         self.s3.upload_fileobj(
             file.file,
             Bucket=self.minio_conf.bucket_name,
-            Key=object_name,
+            Key=key,
             ExtraArgs={"ContentType": file.content_type},
         )
 
-        file_url = f"{self.endpoint_url}/{self.minio_conf.bucket_name}/{object_name}"
-        return file_url
+        return f"{self.cdn_base_url}/{self.minio_conf.bucket_name}/{key}"
+
+    def generate_presigned_url(self, key: str, expires_in: int = 3600) -> str:
+        return self.s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.minio_conf.bucket_name, "Key": key},
+            ExpiresIn=expires_in,
+        )
+
+    def delete_object(self, key: str):
+        logger.info(f"[MinIO] Deleting object: {key}")
+        self.s3.delete_object(Bucket=self.minio_conf.bucket_name, Key=key)
+
+    def list_objects(self, prefix: str = "") -> list[str]:
+        response = self.s3.list_objects_v2(Bucket=self.minio_conf.bucket_name, Prefix=prefix)
+        return [obj["Key"] for obj in response.get("Contents", [])]
 
     def create_bucket_if_not_exists(self, bucket_name: str):
         try:
@@ -56,8 +82,10 @@ class MinioClient:
         try:
             self.s3.list_buckets()
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"[MinIO] Connection test failed: {e}")
             return False
+
 
 # 单例对象
 minio_client = MinioClient()

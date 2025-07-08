@@ -1,4 +1,4 @@
-# app/routers/recipe_router.py
+# app/api/routers/recipe_router.py
 
 from uuid import UUID
 from typing import List
