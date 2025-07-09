@@ -1,3 +1,5 @@
+from typing import Dict
+
 from pydantic import BaseModel, Field
 
 class MinIOConfig(BaseModel):
@@ -5,7 +7,10 @@ class MinIOConfig(BaseModel):
     access_key: str
     secret_key: str
     bucket_name: str
+    cdn_base_url: str = ""
+    cdn_prefix_mapping: Dict[str, str] =  {}  # 确保这里是 Dict 类型
     secure: bool = False
+    costume_url: bool = False
 
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
