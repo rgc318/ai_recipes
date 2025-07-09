@@ -5,11 +5,14 @@ from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime
 from math import ceil
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, or_, func
+import logging
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
 UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 class PageResponse(BaseModel, Generic[ModelType]):
     items: List[ModelType]
@@ -33,6 +36,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             field, *direction = clause.strip().split(":")
             order_field = getattr(self.model, field, None)
             if not order_field:
+                logger.warning(f"Ignored invalid order_by field: {field}")
                 continue
             if direction and direction[0].lower() == "asc":
                 stmt = stmt.order_by(asc(order_field))
@@ -79,28 +83,38 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         page: int = 1,
         per_page: int = 10,
     ) -> PageResponse[ModelType]:
-        stmt = self._base_stmt()
-        stmt = self.apply_filters(stmt, filters)
+        try:
+            stmt = self._base_stmt()
+            stmt = self.apply_filters(stmt, filters)
 
-        if search and search_fields:
-            stmt = self.apply_search(stmt, search, search_fields)
+            if search and search_fields:
+                stmt = self.apply_search(stmt, search, search_fields)
 
-        total_result = await db.execute(stmt)
-        total = len(total_result.scalars().all())
+            # 计算总数时，复用相同筛选和搜索条件，改用COUNT(*)
+            count_stmt = select(func.count()).select_from(self.model).where(self.model.is_deleted == False)
+            count_stmt = self.apply_filters(count_stmt, filters)
+            if search and search_fields:
+                count_stmt = self.apply_search(count_stmt, search, search_fields)
 
-        stmt = self.apply_ordering(stmt, order_by)
-        stmt = stmt.offset((page - 1) * per_page).limit(per_page)
+            count_result = await db.execute(count_stmt)
+            total = count_result.scalar() or 0
 
-        result = await db.execute(stmt)
-        items = result.scalars().all()
+            stmt = self.apply_ordering(stmt, order_by)
+            stmt = stmt.offset((page - 1) * per_page).limit(per_page)
 
-        return PageResponse(
-            items=items,
-            total=total,
-            page=page,
-            total_pages=ceil(total / per_page) if per_page else 0,
-            per_page=per_page,
-        )
+            result = await db.execute(stmt)
+            items = result.scalars().all()
+
+            return PageResponse(
+                items=items,
+                total=total,
+                page=page,
+                total_pages=ceil(total / per_page) if per_page else 0,
+                per_page=per_page,
+            )
+        except Exception as e:
+            logger.error(f"Error in list_with_filters: {e}")
+            raise
 
     async def count(self, db: AsyncSession) -> int:
         stmt = self._base_stmt()
@@ -109,26 +123,38 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def create(self, db: AsyncSession, obj_in: Union[CreateSchemaType, Dict[str, Any]]) -> ModelType:
         if isinstance(obj_in, BaseModel):
-            obj_in = obj_in.model_dump()
+            # Pydantic v1 用 obj_in.dict(exclude_unset=True)
+            # Pydantic v2 用 obj_in.model_dump(exclude_unset=True)
+            obj_in = obj_in.dict(exclude_unset=True)
         db_obj = self.model(**obj_in)  # type: ignore
         db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
+        try:
+            await db.commit()
+            await db.refresh(db_obj)
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Create failed: {e}")
+            raise
         return db_obj
 
     async def create_many(self, db: AsyncSession, objs: List[CreateSchemaType]) -> List[ModelType]:
-        db_objs = [self.model(**obj.model_dump()) for obj in objs]
+        db_objs = [self.model(**obj.dict(exclude_unset=True)) for obj in objs]
         db.add_all(db_objs)
-        await db.commit()
-        for obj in db_objs:
-            await db.refresh(obj)
+        try:
+            await db.commit()
+            for obj in db_objs:
+                await db.refresh(obj)
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Batch create failed: {e}")
+            raise
         return db_objs
 
     async def update(
         self, db: AsyncSession, db_obj: ModelType, obj_in: Union[UpdateSchemaType, Dict[str, Any]]
     ) -> ModelType:
         if isinstance(obj_in, BaseModel):
-            obj_in = obj_in.model_dump(exclude_unset=True)
+            obj_in = obj_in.dict(exclude_unset=True)
         for field, value in obj_in.items():
             setattr(db_obj, field, value)
 
@@ -136,8 +162,13 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             db_obj.updated_at = datetime.utcnow()
 
         db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
+        try:
+            await db.commit()
+            await db.refresh(db_obj)
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Update failed: {e}")
+            raise
         return db_obj
 
     async def delete(self, db: AsyncSession, id: UUID) -> bool:
@@ -145,7 +176,12 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         if not obj:
             return False
         await db.delete(obj)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Delete failed: {e}")
+            raise
         return True
 
     async def soft_delete(self, db: AsyncSession, id: UUID) -> bool:
@@ -156,5 +192,10 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         if hasattr(obj, "deleted_at"):
             obj.deleted_at = datetime.utcnow()
         db.add(obj)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Soft delete failed: {e}")
+            raise
         return True
