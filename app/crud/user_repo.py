@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from app.models.user import User
 from app.schemas.user_schemas import UserCreate, UserUpdate
@@ -27,7 +27,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_email(self, db: AsyncSession, email: str) -> Optional[User]:
+    async def get_by_email(self, db: AsyncSession, email: EmailStr) -> Optional[User]:
         stmt = select(self.model).where(self.model.email == email, self.model.is_deleted == False)
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
