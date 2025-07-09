@@ -5,17 +5,17 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from app.crud.user_repo import UserCRUD
+from app.crud.user_repo import UserRepository
 from app.db.session import get_session
 from app.models.user import User
 from app.schemas.user_schemas import UserCreate, UserUpdate
-from app.core.security import get_password_hash  # 假设你实现了这个工具函数
+from app.core.security.password_utils import get_password_hash  # 假设你实现了这个工具函数
 
 
 class UserService:
     def __init__(self, session: AsyncSession = Depends(get_session)):
         self.session = session
-        self.user_repo = UserCRUD(session)
+        self.user_repo = UserRepository(session)
 
     async def get_by_id(self, user_id: UUID) -> User:
         user = await self.user_repo.get_by_id(user_id)
