@@ -55,6 +55,10 @@ logger.add(
     encoding="utf-8",
     enqueue=True
 )
-
+def get_logger(name: str = None):
+    """仿 logging.getLogger() 实现的 loguru logger 工厂方法"""
+    if name:
+        return logger.bind(module=name)
+    return logger
 #打印当前日志环境
 logger.debug(f"Log system initialized in {ENV} mode.")
