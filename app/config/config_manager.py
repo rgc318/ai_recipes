@@ -61,6 +61,7 @@ def get_app_config() -> AppConfig:
     data = interpolate_env_vars(data)
 
     config = AppConfig(**data)
+    logger.info(f"🔧 配置文件内容: {config}")
     return config
 
 

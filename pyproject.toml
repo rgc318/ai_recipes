@@ -12,4 +12,6 @@ dependencies = [
     "bcrypt",
     "boto3",
     "pyyaml",
+    "python-multipart",
+    "tenacity",
 ]

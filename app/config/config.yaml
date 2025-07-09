@@ -7,11 +7,16 @@ database:
   url: "postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
 minio:
-  endpoint: "192.168.31.229:19000"
-  access_key: "${MINIO_ACCESS_KEY}"
-  secret_key: "${MINIO_SECRET}"
-  bucket_name: "ai-recipes"
-  secure: false
+  endpoint: "192.168.31.229:19000"              # MinIO 服务的地址和端口
+  access_key: "${MINIO_ACCESS_KEY}"             # 从环境变量中读取 MinIO 的 Access Key
+  secret_key: "${MINIO_SECRET}"                 # 从环境变量中读取 MinIO 的 Secret Key
+  bucket_name: "ai-recipes"                     # 目标存储桶
+  secure: false                                 # 是否使用 https，默认为 false（MinIO 不使用 https 时）
+  costume_url: true                                 # 是否使用 自定义url
+  cdn_base_url: "http://192.168.31.229:19000"        # 公网 CDN 地址，用于生成文件的访问 URL
+#  cdn_prefix_mapping:
+#    "/user-avatars": "https://cdn.example.com/user-avatars"
+#    "/recipe-images": "https://cdn.example.com/recipe-images"
 
 logging:
   enable_file: true
