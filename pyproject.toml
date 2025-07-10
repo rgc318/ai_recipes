@@ -16,4 +16,5 @@ dependencies = [
     "tenacity",
     "pyjwt==2.10.1",
     "python-jose",
+    "prometheus_client",
 ]

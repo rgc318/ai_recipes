@@ -11,19 +11,13 @@ from app.core.response_codes import ResponseCodeEnum
 
 router = APIRouter()
 
-
-# === Dependency ===
-def get_user_service(session: AsyncSession = Depends(get_session)) -> UserService:
-    return UserService(session)
-
-
 # === Create User ===
 @router.post(
     "/",
     response_model=StandardResponse[UserRead],
     status_code=status.HTTP_201_CREATED
 )
-async def create_user(user_data: UserCreate, service: UserService = Depends(get_user_service)):
+async def create_user(user_data: UserCreate, service: UserService = Depends()):
     try:
         user = await service.create_user(user_data)
         return response_success(
@@ -45,7 +39,7 @@ async def create_user(user_data: UserCreate, service: UserService = Depends(get_
     "/{user_id}",
     response_model=StandardResponse[UserRead]
 )
-async def read_user(user_id: UUID, service: UserService = Depends(get_user_service)):
+async def read_user(user_id: UUID, service: UserService = Depends()):
     user = await service.get_by_id(user_id)
     if not user:
         return response_error(
@@ -61,7 +55,7 @@ async def read_user(user_id: UUID, service: UserService = Depends(get_user_servi
     "/{user_id}",
     response_model=StandardResponse[UserRead]
 )
-async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService = Depends(get_user_service)):
+async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService = Depends()):
     updated_user = await service.update_user(user_id, user_data)
     if not updated_user:
         return response_error(
@@ -78,7 +72,7 @@ async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService
     response_model=StandardResponse[NoneType],
     status_code=status.HTTP_200_OK
 )
-async def delete_user(user_id: UUID, service: UserService = Depends(get_user_service)):
+async def delete_user(user_id: UUID, service: UserService = Depends()):
     deleted = await service.delete_user(user_id)
     if not deleted:
         return response_error(

@@ -2,24 +2,21 @@ from typing import Optional, Sequence, List
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crud.recipe_repo import RecipeRepository
-from app.db.session import get_session
+from app.db.repository_factory_auto import RepositoryFactory
+from app.db.get_repo_factory import get_repository_factory
 from app.models.recipe import Recipe
 from app.schemas.recipe_schemas import RecipeCreate, RecipeUpdate
+from app.db.crud.recipe_repo import RecipeRepository
 
 
 class RecipeService:
-    def __init__(self, session: AsyncSession = Depends(get_session)):
-        self.session = session
-        self.recipe_repo = RecipeRepository()
+    def __init__(self, factory: RepositoryFactory = Depends(get_repository_factory)):
+        self.factory = factory
+        self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)
 
     async def list_recipes(self) -> Sequence[Recipe]:
-        """
-        获取所有未删除的菜谱（含标签、配料等）。
-        """
-        return await self.recipe_repo.get_all(self.session)
+        return await self.recipe_repo.get_all()
 
     async def list_recipes_paginated(
         self,
@@ -28,59 +25,53 @@ class RecipeService:
         search: str = "",
         order_by: str = "created_at desc",
     ) -> List[Recipe]:
-        """
-        分页获取菜谱列表（可搜索/排序）。
-        """
         return await self.recipe_repo.list_paginated(
-            db=self.session,
             page=page,
             per_page=per_page,
             search=search,
-            order_by=order_by
+            order_by=order_by,
         )
 
     async def get_by_id(self, recipe_id: UUID) -> Optional[Recipe]:
-        """
-        获取单个菜谱详情（含标签、配料等）。
-        """
-        return await self.recipe_repo.get_by_id(self.session, recipe_id)
+        return await self.recipe_repo.get_by_id(recipe_id)
 
     async def create(
         self, recipe_in: RecipeCreate, created_by: Optional[UUID] = None
     ) -> Recipe:
-        """
-        创建新菜谱，包含标签和配料的绑定。
-        """
-        recipe = await self.recipe_repo.create(self.session, recipe_in)
+        recipe = await self.recipe_repo.create(recipe_in)
 
         if created_by:
             recipe.created_by = created_by
             recipe.updated_by = created_by
-            self.session.add(recipe)
-            await self.session.commit()
-            await self.session.refresh(recipe)
+            session = self.factory.get_session()
+            session.add(recipe)
+            await session.commit()
+            await session.refresh(recipe)
 
         return recipe
 
     async def update(
         self, recipe_id: UUID, recipe_in: RecipeUpdate, updated_by: Optional[UUID] = None
     ) -> Optional[Recipe]:
-        """
-        更新菜谱内容、标签与配料。
-        """
-        recipe = await self.recipe_repo.update(self.session, recipe_id, recipe_in)
+        recipe = await self.recipe_repo.update(recipe_id, recipe_in)
 
         if recipe and updated_by:
             recipe.updated_by = updated_by
-            self.session.add(recipe)
-            await self.session.commit()
-            await self.session.refresh(recipe)
+            session = self.factory.get_session()
+            session.add(recipe)
+            await session.commit()
+            await session.refresh(recipe)
 
         return recipe
 
     async def delete(self, recipe_id: UUID, deleted_by: Optional[UUID] = None) -> bool:
-        """
-        逻辑删除菜谱（软删除）。
-        """
-        recipe = await self.recipe_repo.soft_delete(self.session, recipe_id, deleted_by)
+        recipe = await self.recipe_repo.soft_delete(recipe_id)
+
+        if recipe and deleted_by:
+            recipe.deleted_by = deleted_by
+            session = self.factory.get_session()
+            session.add(recipe)
+            await session.commit()
+            await session.refresh(recipe)
+
         return recipe is not None

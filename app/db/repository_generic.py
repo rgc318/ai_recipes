@@ -26,7 +26,7 @@ from mealie.schema.response.pagination import (
 from mealie.schema.response.query_filter import QueryFilterBuilder
 from mealie.schema.response.query_search import SearchFilter
 
-from ._utils import NOT_SET, NotSet
+from app.db._utils import NOT_SET, NotSet
 
 
 class RepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase]:
