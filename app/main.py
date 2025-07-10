@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from app.core.logger import logger
 from app.core.global_exception import BaseBusinessException
 from app.core.response_codes import ResponseCodeEnum
+from app.domain.event_bus import event_bus
+from app.domain.events import DomainEvent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时自动执行的逻辑
@@ -39,5 +41,10 @@ async def global_exception_handler(request: Request, exc: Exception):
             "data": None
         }
     )
+
+# def handle_some_created(event: DomainEvent):
+#     print(f"Handled event: {event.name}, payload: {event.payload}")
+
+# event_bus.subscribe("SomeCreated", handle_some_created)
 app.include_router(api_router)
 logger.info(app.routes)
