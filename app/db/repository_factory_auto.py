@@ -1,4 +1,4 @@
-# app/repositories/repository_factory.py
+# app/db/repository_factory_auto.py
 import asyncio
 from typing import Optional, Any, Type, TypeVar, AsyncGenerator, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,11 +38,16 @@ class RepositoryFactory:
         context: Optional[dict] = None
     ):
         self._db = db
-        self.context = context or {
-            "user_id": user_id,
-            "tenant_id": tenant_id,
-            "group_id": group_id,
-        } or get_request_scope()
+        if context:
+            self.context = context
+        elif user_id or tenant_id or group_id:
+            self.context = {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "group_id": group_id,
+            }
+        else:
+            self.context = get_request_scope()
         self._registry: Dict[str, BaseRepository] = {}
     # ==========
     # 通过名称获取 Repository
@@ -56,7 +61,7 @@ class RepositoryFactory:
             repo_cls = BaseRepository.registry.get(name)
             if not repo_cls:
                 raise RepositoryNotFoundError(f"Repository '{name}' not registered.")
-            instance = repo_cls(self._db, repo_cls.model, context=self.context)
+            instance = repo_cls(self._db, context=self.context)
             self._registry[name] = instance
         return self._registry[name]
 
