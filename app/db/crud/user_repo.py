@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional, Union
 from uuid import UUID
 from sqlalchemy import select
@@ -36,4 +37,60 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             return None
         return await super().update(user, updates)
 
-    # 如果没有自定义逻辑，可直接使用父类 soft_delete 方法
+    async def get_by_phone(self, phone: str) -> Optional[User]:
+        stmt = select(self.model).where(
+            self.model.phone == phone,
+            self.model.is_deleted == False
+        )
+        return await self._run_and_scalar(stmt, "get_by_phone")
+
+    async def set_last_login(self, user_id: UUID) -> None:
+        user = await self.get_by_id(user_id)
+        if not user:
+            return
+        user.last_login = datetime.utcnow()
+        self.db.add(user)
+        try:
+            await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            raise e
+
+    async def change_password(self, user_id: UUID, hashed_password: str) -> bool:
+        user = await self.get_by_id(user_id)
+        if not user:
+            return False
+        user.hashed_password = hashed_password
+        self.db.add(user)
+        try:
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            raise e
+
+    async def disable_user(self, user_id: UUID) -> bool:
+        user = await self.get_by_id(user_id)
+        if not user:
+            return False
+        user.is_active = False
+        self.db.add(user)
+        try:
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            raise e
+
+    async def enable_user(self, user_id: UUID) -> bool:
+        user = await self.get_by_id(user_id)
+        if not user:
+            return False
+        user.is_active = True
+        self.db.add(user)
+        try:
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            raise e

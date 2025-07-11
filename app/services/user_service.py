@@ -63,3 +63,7 @@ class UserService:
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return await self.user_repo.soft_delete(user_id)
+
+    async def lock_user(self, user):
+        user.is_locked = True
+        await self.user_repo.update(user.id, user)

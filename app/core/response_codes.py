@@ -13,7 +13,11 @@ class ResponseCodeEnum(Enum):
     SERVER_ERROR = (50000, "服务器内部错误")
 
     USER_ALREADY_EXISTS = (40010, "用户已存在")
-    USER_NOT_FOUND = (40410, "用户不存在")
+    USER_NOT_FOUND = (40010, "用户不存在")
+    CHANGE_PASSWORD_FAILED = (40020, "修改密码失败")
+    RESET_PASSWORD_FAILED = (40030, "重置密码失败")
+    LOGIN_FAILED = (40040, "登录失败")
+    USER_LOCKED_OUT = (40050, "用户已被锁定")
 
     def __init__(self, code: int, message: str):
         self._code = code

@@ -3,7 +3,7 @@ from typing import Protocol
 
 import bcrypt
 
-from app.core.config import get_app_settings
+from app.config.settings import settings
 
 
 class Hasher(Protocol):
@@ -34,7 +34,7 @@ class BcryptHasher:
 
 @lru_cache(maxsize=1)
 def get_hasher() -> Hasher:
-    settings = get_app_settings()
+
 
     if settings.TESTING:
         return FakeHasher()

@@ -1,14 +1,30 @@
 # app/core/exceptions.py
 
+from typing import Optional
+
 class BaseBusinessException(Exception):
-    def __init__(self, code, message):
-        self.code = code
-        self.message = message
+    code: int = 50000
+    message: str = "业务异常"
+    status_code: int = 400
+
+    def __init__(self, code: Optional[int] = None, message: Optional[str] = None):
+        if code:
+            self.code = code
+        if message:
+            self.message = message
+        super().__init__(self.message)
 
 class UserNotFoundException(BaseBusinessException):
-    def __init__(self):
-        super().__init__(code=40404, message="用户不存在")
+    code = 40404
+    message = "用户不存在"
+    status_code = 404
 
 class UserLockedOut(BaseBusinessException):
-    def __init__(self):
-        super().__init__(code=40404, message="用户不存在")
+    code = 40301
+    message = "用户已被锁定，请稍后再试"
+    status_code = 403
+
+class UnauthorizedException(BaseBusinessException):
+    code = "UNAUTHORIZED"
+    message = "未授权"
+    status_code = 401

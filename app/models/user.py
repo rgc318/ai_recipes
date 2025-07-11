@@ -3,6 +3,8 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from sqlmodel import SQLModel, Field
+
+from app.enums.auth_method import AuthMethod
 from app.models.base.base_model import BaseModel
 from app.schemas.user_schemas import UserRead
 
@@ -19,10 +21,11 @@ class User(BaseModel, table=True):
     avatar_url: Optional[str] = None
 
     hashed_password: str = Field(nullable=False)
-
-    is_active: bool = Field(default=True)
+    auth_method: AuthMethod = Field(default=AuthMethod.app,nullable=True)  # ✅ 新增    is_active: bool = Field(default=True)
+    login_attempts: int = Field(default=0)  # 👈 添加此行
     is_superuser: bool = Field(default=False)
     is_verified: bool = Field(default=False)
+    is_locked: bool = Field(default=False)
 
     last_login_at: Optional[datetime] = None
     login_count: int = Field(default=0)
