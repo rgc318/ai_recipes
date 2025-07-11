@@ -38,14 +38,14 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
             )
             return None
 
-        if user.login_attemps >= settings.SECURITY_MAX_LOGIN_ATTEMPTS or user.is_locked:
+        if user.login_attemps >= settings.security_settings.max_login_attempts or user.is_locked:
             raise UserLockedOut()
 
         if not CredentialsProvider.verify_password(self.data.password, user.password):
             user.login_attemps += 1
             db.users.update(user.id, user)
 
-            if user.login_attemps >= settings.SECURITY_MAX_LOGIN_ATTEMPTS:
+            if user.login_attemps >= settings.security_settings.max_login_attempts:
                 user_service = UserService(db)
                 user_service.lock_user(user)
 

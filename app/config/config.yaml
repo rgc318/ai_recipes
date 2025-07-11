@@ -23,3 +23,22 @@ logging:
   log_dir: "logs"
   rotation: "1 week"
   retention: "1 month"
+
+security_settings:
+  token_expire_minutes: 60  # 例如 60 分钟
+  jwt_algorithm: "HS256"
+  jwt_issuer: "ai-recipes"
+  jwt_audience: "ai-recipes-users"
+  secret: "your-super-secret"
+  max_login_attempts: 5
+  user_lockout_time: 1  # 单位：小时
+
+redis:
+  host: "192.168.31.229"
+  port: 26739
+  db: 0
+  password: "${REDIS_PASSWORD}"
+  max_connections: 10
+  socket_timeout: 5
+  socket_connect_timeout: 5
+  serializer: "json"

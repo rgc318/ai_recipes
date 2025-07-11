@@ -31,7 +31,7 @@ def interpolate_env_vars(obj):
         v = value.lower()
         if v == "true": return True
         if v == "false": return False
-        if v.isdigit(): return int(v)
+        # if v.isdigit(): return int(v)
         return value
 
     if isinstance(obj, dict):

@@ -26,8 +26,36 @@ class LoggingConfig(BaseModel):
     rotation: str = "1 week"
     retention: str = "1 month"
 
+class SecuritySettings(BaseModel):
+    token_expire_minutes: int
+    jwt_algorithm: str
+    jwt_issuer: str
+    jwt_audience: str
+    secret: str
+    max_login_attempts: int
+    user_lockout_time: int  # 小时
+
+class RedisConfig(BaseModel):
+    host: str = "localhost"
+    port: int = 6379
+    db: int = 0
+    password: str = ""
+    max_connections: int = 10
+    socket_timeout: int = 5
+    socket_connect_timeout: int = 5
+    serializer: str = "json"
+
+    @property
+    def url(self):
+        auth_part = f":{self.password}@" if self.password else ""
+        return f"redis://{auth_part}{self.host}:{self.port}/{self.db}"
+
+
+
 class AppConfig(BaseModel):
     server: ServerConfig
     database: DatabaseConfig
     minio: MinIOConfig
     logging: LoggingConfig
+    security_settings: SecuritySettings
+    redis: RedisConfig

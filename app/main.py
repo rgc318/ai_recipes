@@ -8,15 +8,47 @@ from app.core.global_exception import BaseBusinessException
 from app.core.response_codes import ResponseCodeEnum
 from app.domain.event_bus import event_bus
 from app.domain.events import DomainEvent
+from app.config.settings import settings
+from app.utils.redis_client import RedisClient
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时自动执行的逻辑
+    logger.info("🚀 应用启动中，正在初始化资源...")
+
+    # 初始化数据库
     await create_db_and_tables()
+
+    # 初始化 Redis
+    redis_cfg = settings.redis
+    await RedisClient.init(
+        redis_url=redis_cfg.url,
+        max_connections=redis_cfg.max_connections,
+        socket_timeout=redis_cfg.socket_timeout,
+        socket_connect_timeout=redis_cfg.socket_connect_timeout,
+        serializer=redis_cfg.serializer,
+    )
+    logger.info("✅ 所有资源初始化完成")
+
     yield
-    # 关闭时可以加资源清理代码（可选）
+
+    # 应用关闭，释放资源
+    await RedisClient.close()
+    logger.info("🛑 应用已关闭，Redis 已断开连接")
 
 
 app = FastAPI(title="AI Recipe Project", lifespan=lifespan)
+
+@app.on_event("startup")
+async def startup_event():
+    redis_cfg = settings.redis
+    await RedisClient.init(
+        redis_url=redis_cfg.url,
+        max_connections=redis_cfg.max_connections,
+        socket_timeout=redis_cfg.socket_timeout,
+        socket_connect_timeout=redis_cfg.socket_connect_timeout,
+        serializer=redis_cfg.serializer,
+    )
 @app.exception_handler(BaseBusinessException)
 async def business_exception_handler(request: Request, exc: BaseBusinessException):
     logger.warning(f"Business Exception | code: {exc.code}, message: {exc.message}, path: {request.url.path}")

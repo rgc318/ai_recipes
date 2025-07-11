@@ -1,89 +1,146 @@
-from types import NoneType
+from datetime import datetime, timezone
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Body
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Annotated
 
 from app.db.session import get_session
-from app.services.user_service import UserService
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead
+from app.db.repository_factory_auto import RepositoryFactory
+from app.services.auth_service import AuthService
+from app.schemas.user_schemas import UserCreate
+from app.schemas.auth_schemas import (
+    AuthTokenResponse,
+    ChangePasswordRequest,
+    ResetPasswordRequest,
+)
 from app.core.api_response import response_success, response_error, StandardResponse
 from app.core.response_codes import ResponseCodeEnum
+from app.core.logger import logger
+from app.core.global_exception import UserLockedOut
 
 router = APIRouter()
 
 
-# === Dependency ===
-def get_user_service(session: AsyncSession = Depends(get_session)) -> UserService:
-    return UserService(session)
+# === Dependencies ===
+def get_auth_service(session: AsyncSession = Depends(get_session)) -> AuthService:
+    return AuthService(RepositoryFactory(session))
 
 
-# === Create User ===
+# === Register ===
 @router.post(
-    "/",
-    response_model=StandardResponse[UserRead],
-    status_code=status.HTTP_201_CREATED
+    "/register",
+    response_model=StandardResponse[UUID],
+    status_code=status.HTTP_201_CREATED,
 )
-async def create_user(user_data: UserCreate, service: UserService = Depends(get_user_service)):
+async def register_user(
+    user_data: UserCreate,
+    service: AuthService = Depends(get_auth_service)
+):
     try:
-        user = await service.create_user(user_data)
+        user = await service.register_user(user_data)
         return response_success(
-            data=user,
+            data=user.id,
             code=ResponseCodeEnum.CREATED,
-            message="用户创建成功",
-            http_status=status.HTTP_201_CREATED
+            message="用户注册成功",
+            http_status=status.HTTP_201_CREATED,
         )
-    except ValueError as e:
+    except Exception as e:
+        logger.warning(f"用户注册失败: {str(e)}")
         return response_error(
             code=ResponseCodeEnum.USER_ALREADY_EXISTS,
             message=str(e),
-            http_status=status.HTTP_400_BAD_REQUEST
+            http_status=status.HTTP_400_BAD_REQUEST,
         )
 
 
-# === Get User By ID ===
-@router.get(
-    "/{user_id}",
-    response_model=StandardResponse[UserRead]
+# === Login ===
+@router.post(
+    "/login",
+    response_model=StandardResponse[AuthTokenResponse],
+    status_code=status.HTTP_200_OK,
 )
-async def read_user(user_id: UUID, service: UserService = Depends(get_user_service)):
-    user = await service.get_by_id(user_id)
-    if not user:
-        return response_error(
-            code=ResponseCodeEnum.USER_NOT_FOUND,
-            message="用户不存在",
-            http_status=status.HTTP_404_NOT_FOUND
+async def login_user(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    remember_me: bool = Body(default=False),
+    service: AuthService = Depends(get_auth_service)
+):
+    try:
+        token, expires = await service.login_user(
+            username=form_data.username,
+            password=form_data.password,
+            remember_me=remember_me,
         )
-    return response_success(data=user)
+        expires = datetime.now(timezone.utc) + expires
+        return response_success(
+            data=AuthTokenResponse(access_token=token, expires_at=expires),
+            message="登录成功",
+        )
+    except UserLockedOut:
+        return response_error(
+            code=ResponseCodeEnum.USER_LOCKED_OUT,
+            message="用户账户已被锁定，请稍后重试",
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    except Exception as e:
+        logger.warning(f"登录失败: {str(e)}")
+        return response_error(
+            code=ResponseCodeEnum.LOGIN_FAILED,
+            message="用户名或密码错误",
+            http_status=status.HTTP_401_UNAUTHORIZED,
+        )
 
 
-# === Update User ===
-@router.put(
-    "/{user_id}",
-    response_model=StandardResponse[UserRead]
+# === Change Password ===
+@router.post(
+    "/change-password",
+    response_model=StandardResponse[bool]
 )
-async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService = Depends(get_user_service)):
-    updated_user = await service.update_user(user_id, user_data)
-    if not updated_user:
-        return response_error(
-            code=ResponseCodeEnum.USER_NOT_FOUND,
-            message="用户更新失败，用户不存在",
-            http_status=status.HTTP_404_NOT_FOUND
+async def change_password(
+    payload: ChangePasswordRequest,
+    service: AuthService = Depends(get_auth_service)
+):
+    try:
+        result = await service.change_password(
+            user_id=payload.user_id,
+            old_password=payload.old_password,
+            new_password=payload.new_password,
         )
-    return response_success(data=updated_user, message="用户更新成功")
+        return response_success(
+            data=result,
+            message="密码修改成功",
+        )
+    except Exception as e:
+        logger.warning(f"密码修改失败: {str(e)}")
+        return response_error(
+            code=ResponseCodeEnum.CHANGE_PASSWORD_FAILED,
+            message=str(e),
+            http_status=status.HTTP_400_BAD_REQUEST,
+        )
 
 
-# === Soft Delete User ===
-@router.delete(
-    "/{user_id}",
-    response_model=StandardResponse[NoneType],
-    status_code=status.HTTP_200_OK
+# === Reset Password ===
+@router.post(
+    "/reset-password",
+    response_model=StandardResponse[bool]
 )
-async def delete_user(user_id: UUID, service: UserService = Depends(get_user_service)):
-    deleted = await service.delete_user(user_id)
-    if not deleted:
-        return response_error(
-            code=ResponseCodeEnum.USER_NOT_FOUND,
-            message="用户删除失败，用户不存在",
-            http_status=status.HTTP_404_NOT_FOUND
+async def reset_password(
+    payload: ResetPasswordRequest,
+    service: AuthService = Depends(get_auth_service)
+):
+    try:
+        result = await service.reset_password(
+            email=str(payload.email),
+            new_password=payload.new_password,
         )
-    return response_success(data=None, message="用户已删除")
+        return response_success(
+            data=result,
+            message="密码重置成功",
+        )
+    except Exception as e:
+        logger.warning(f"密码重置失败: {str(e)}")
+        return response_error(
+            code=ResponseCodeEnum.RESET_PASSWORD_FAILED,
+            message=str(e),
+            http_status=status.HTTP_400_BAD_REQUEST,
+        )

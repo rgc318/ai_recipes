@@ -1,69 +1,57 @@
 from datetime import timedelta
-
-from sqlalchemy.orm.session import Session
-
 from app.core.logger import get_logger
 from app.config import settings
-from app.core.global_exception import UserLockedOut
 from app.core.security.hasher import get_hasher
 from app.core.security.providers.auth_provider import AuthProvider
-# from app.models.users.users import AuthMethod
-# from app.repos.all_repositories import get_repositories
-# from app.schema.user.auth import CredentialsRequest
+from app.core.global_exception import UserLockedOut
+from app.schemas.user_schemas import CredentialsRequest
 from app.services.user_service import UserService
+from app.db.get_repo_factory import get_repository_factory
+from app.enums.auth_method import AuthMethod
+
+logger = get_logger("credentials_provider")
 
 
 class CredentialsProvider(AuthProvider[CredentialsRequest]):
-    """Authentication provider that authenticates a user the database using username/password combination"""
+    def __init__(self, data: CredentialsRequest):
+        # ✅ 正确调用基类初始化
+        repo_factory = None  # 占位，异步初始化
+        super().__init__(repo_factory=repo_factory, data= data)
 
-    _logger = get_logger("credentials_provider")
+    async def authenticate(self) -> tuple[str, timedelta] | None:
+        # ✅ 获取仓库（可放入 __init__）
+        repo_factory = await get_repository_factory()
+        self.db = repo_factory  # ✅ 设置基类中的 self.db
 
-    def __init__(self, session: Session, data: CredentialsRequest) -> None:
-        super().__init__(session, data)
-
-    def authenticate(self) -> tuple[str, timedelta] | None:
-        """Attempt to authenticate a user given a username and password"""
-
-        db = get_repositories(self.session, group_id=None, household_id=None)
-        user = self.try_get_user(self.data.username)
+        user = await self.db.users.get_by_username(self.data.username)
 
         if not user:
-            self.verify_fake_password()
+            await self.verify_fake_password()
             return None
 
         if user.auth_method != AuthMethod.app:
-            self.verify_fake_password()
-            self._logger.warning(
-                "Found user but their auth method is not 'app'. Unable to continue with credentials login"
-            )
+            await self.verify_fake_password()
+            logger.warning("Auth method mismatch for user.")
             return None
 
-        if user.login_attemps >= settings.SECURITY_MAX_LOGIN_ATTEMPTS or user.is_locked:
+        if user.login_attempts >= settings.security_settings.max_login_attempts or user.is_locked:
             raise UserLockedOut()
 
-        if not CredentialsProvider.verify_password(self.data.password, user.password):
-            user.login_attemps += 1
-            db.users.update(user.id, user)
-
-            if user.login_attemps >= settings.SECURITY_MAX_LOGIN_ATTEMPTS:
-                user_service = UserService(db)
-                user_service.lock_user(user)
-
+        if not self.verify_password(self.data.password, user.password):
+            user.login_attempts += 1
+            await self.db.users.update(user.id, user)
+            if user.login_attempts >= settings.security_settings.max_login_attempts:
+                await UserService(self.db).lock_user(user)
             return None
 
-        user.login_attemps = 0
-        user = db.users.update(user.id, user)
-        return self.get_access_token(user, self.data.remember_me)  # type: ignore
+        user.login_attempts = 0
+        await self.db.users.update(user.id, user)
 
-    def verify_fake_password(self):
-        # To prevent user enumeration we perform the verify_password computation to ensure
-        # server side time is relatively constant and not vulnerable to timing attacks.
-        CredentialsProvider.verify_password(
-            "abc123cba321",
-            "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i",
-        )
+        # ✅ 直接使用父类中的 get_access_token 方法（无需重复调用 jwt_utils）
+        return self.get_access_token(user, self.data.remember_me)
 
-    @staticmethod
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Compares a plain string to a hashed password"""
-        return get_hasher().verify(plain_password, hashed_password)
+    async def verify_fake_password(self):
+        self.verify_password("fake-password", "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i")
+
+    def verify_password(self, plain: str, hashed: str) -> bool:
+        return get_hasher().verify(plain, hashed)
