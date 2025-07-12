@@ -70,6 +70,20 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             stmt = stmt.where(or_(*conditions))
         return stmt
 
+    async def get_one(self, value: str, field: str, any_case: bool = False):
+        col = getattr(self.model, field)
+        if any_case:
+            stmt = select(self.model).where(
+                col.ilike(value),
+                self.model.is_deleted == False
+            )
+        else:
+            stmt = select(self.model).where(
+                col == value,
+                self.model.is_deleted == False
+            )
+        return await self._run_and_scalar(stmt, f"get_one_by_{field}")
+
     async def get_by_id(self, id: UUID) -> Optional[ModelType]:
         stmt = self._base_stmt().where(self.model.id == id)
         return await self._run_and_scalar(stmt, "get_by_id")

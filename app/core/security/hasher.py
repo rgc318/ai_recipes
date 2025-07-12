@@ -36,7 +36,7 @@ class BcryptHasher:
 def get_hasher() -> Hasher:
 
 
-    if settings.TESTING:
+    if settings.security_settings.testing:
         return FakeHasher()
 
     return BcryptHasher()
