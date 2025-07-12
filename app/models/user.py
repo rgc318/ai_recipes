@@ -26,6 +26,7 @@ class User(BaseModel, table=True):
     is_superuser: bool = Field(default=False)
     is_verified: bool = Field(default=False)
     is_locked: bool = Field(default=False)
+    is_active: bool = Field(default=True, nullable=False)
 
     last_login_at: Optional[datetime] = None
     login_count: int = Field(default=0)
