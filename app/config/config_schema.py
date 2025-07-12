@@ -34,6 +34,8 @@ class SecuritySettings(BaseModel):
     secret: str
     max_login_attempts: int
     user_lockout_time: int  # 小时
+    fake_password_hash: str = "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i"
+    testing: bool = False
 
 class RedisConfig(BaseModel):
     host: str = "localhost"

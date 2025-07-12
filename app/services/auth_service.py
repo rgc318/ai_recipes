@@ -1,9 +1,10 @@
 import datetime
-from typing import Optional
+from typing import Optional, Type
 from uuid import UUID
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 
 from app.db.repository_factory_auto import RepositoryFactory
 from app.db.crud.user_repo import UserRepository
@@ -15,7 +16,15 @@ from app.services.user_service import UserService
 from app.enums.auth_method import AuthMethod
 from app.core.global_exception import UserLockedOut
 from app.config import settings
+from app.core.security.providers import AuthProvider, CredentialsProvider
 
+# === 登录方式注册表（未来支持更多方式在此扩展）===
+AUTH_PROVIDER_REGISTRY: dict[AuthMethod, Type[AuthProvider]] = {
+    AuthMethod.app: CredentialsProvider,
+    # AuthMethod.email_code: EmailCodeProvider,
+    # AuthMethod.wechat: WeChatProvider,
+    # AuthMethod.github: GitHubProvider,
+}
 
 class AuthService:
     def __init__(self, repo_factory: RepositoryFactory):
@@ -37,34 +46,21 @@ class AuthService:
         user_orm = await self.user_repo.create(user_data)
         return user_orm
 
-    async def login_user(self, username: str, password: str, remember_me: bool = False) -> tuple[str, timedelta]:
-        user = await self.user_repo.get_by_username(username)
+    async def login_user(self, method: AuthMethod, data: BaseModel) -> tuple[str, timedelta]:
+        """
+        登录入口：根据认证方式调用不同 Provider 执行认证。
+        返回 access_token 和有效期。
+        """
+        provider_cls = AUTH_PROVIDER_REGISTRY.get(method)
+        if not provider_cls:
+            raise HTTPException(status_code=400, detail=f"Unsupported auth method: {method}")
 
-        if not user:
-            self.verify_fake_password()  # 防止用户枚举
+        provider = provider_cls(repo_factory=self.factory, data=data)  # ✅ 传入 repo_factory
+        token, expires = await provider.authenticate()
+
+        if not token:
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
-        if user.login_attempts >= settings.security_settings.max_login_attempts or user.is_locked:
-            raise UserLockedOut()
-
-        if not verify_password(password, user.hashed_password):
-            user.login_attempts += 1
-            await self.user_repo.update(user.id, user)
-            if user.login_attempts >= settings.security_settings.max_login_attempts:
-                await UserService(self.factory).lock_user(user)
-                user = await self.user_repo.get_by_id(user.id)  # 重新获取，更新锁定状态
-                if user.is_locked:
-                    raise UserLockedOut()
-            raise HTTPException(status_code=401, detail="Invalid username or password")
-
-        # 成功登录
-        user.login_attempts = 0
-        user.last_login_at = datetime.utcnow()
-        await self.user_repo.update(user.id, user)
-
-        token, expires, _jti = create_access_token(
-            data={"sub": str(user.id)}, remember_me=remember_me
-        )
         return token, expires
 
     async def change_password(self, user_id: UUID, old_password: str, new_password: str) -> bool:
@@ -86,8 +82,6 @@ class AuthService:
         if not user.is_active:
             raise HTTPException(status_code=400, detail="User is inactive")
         hashed_password = get_password_hash(new_password)
-        await self.user_repo.update(user.id, {"password": hashed_password})
+        await self.user_repo.update(user.id, {"hashed_password": hashed_password})
         return True
 
-    def verify_fake_password(self):
-        verify_password("fake-password", "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i")

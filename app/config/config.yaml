@@ -30,6 +30,8 @@ security_settings:
   jwt_issuer: "ai-recipes"
   jwt_audience: "ai-recipes-users"
   secret: "your-super-secret"
+  fake_password_hash: "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i"
+  testing: false
   max_login_attempts: 5
   user_lockout_time: 1  # 单位：小时
 

@@ -7,8 +7,9 @@ from typing import Annotated
 
 from app.db.session import get_session
 from app.db.repository_factory_auto import RepositoryFactory
+from app.enums.auth_method import AuthMethod
 from app.services.auth_service import AuthService
-from app.schemas.user_schemas import UserCreate
+from app.schemas.user_schemas import UserCreate, CredentialsRequest
 from app.schemas.auth_schemas import (
     AuthTokenResponse,
     ChangePasswordRequest,
@@ -66,14 +67,18 @@ async def login_user(
     service: AuthService = Depends(get_auth_service)
 ):
     try:
-        token, expires = await service.login_user(
+        credentials = CredentialsRequest(
             username=form_data.username,
             password=form_data.password,
             remember_me=remember_me,
         )
-        expires = datetime.now(timezone.utc) + expires
+        token, expires = await service.login_user(
+            method=AuthMethod.app,
+            data=credentials,
+        )
+        expires_at = datetime.now(timezone.utc) + expires
         return response_success(
-            data=AuthTokenResponse(access_token=token, expires_at=expires),
+            data=AuthTokenResponse(access_token=token, expires_at=expires_at),
             message="登录成功",
         )
     except UserLockedOut:
