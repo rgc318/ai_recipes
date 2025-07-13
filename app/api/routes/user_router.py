@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.services.user_service import UserService
+from app.api.dependencies.services import get_user_service
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead
 from app.core.api_response import response_success, response_error, StandardResponse
 from app.core.response_codes import ResponseCodeEnum
@@ -17,7 +18,7 @@ router = APIRouter()
     response_model=StandardResponse[UserRead],
     status_code=status.HTTP_201_CREATED
 )
-async def create_user(user_data: UserCreate, service: UserService = Depends()):
+async def create_user(user_data: UserCreate, service: UserService = Depends(get_user_service)):
     try:
         user = await service.create_user(user_data)
         return response_success(
@@ -39,7 +40,7 @@ async def create_user(user_data: UserCreate, service: UserService = Depends()):
     "/{user_id}",
     response_model=StandardResponse[UserRead]
 )
-async def read_user(user_id: UUID, service: UserService = Depends()):
+async def read_user(user_id: UUID, service: UserService = Depends(get_user_service)):
     user = await service.get_by_id(user_id)
     if not user:
         return response_error(
@@ -55,7 +56,7 @@ async def read_user(user_id: UUID, service: UserService = Depends()):
     "/{user_id}",
     response_model=StandardResponse[UserRead]
 )
-async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService = Depends()):
+async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService = Depends(get_user_service)):
     updated_user = await service.update_user(user_id, user_data)
     if not updated_user:
         return response_error(
@@ -72,7 +73,7 @@ async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService
     response_model=StandardResponse[NoneType],
     status_code=status.HTTP_200_OK
 )
-async def delete_user(user_id: UUID, service: UserService = Depends()):
+async def delete_user(user_id: UUID, service: UserService = Depends(get_user_service)):
     deleted = await service.delete_user(user_id)
     if not deleted:
         return response_error(

@@ -11,7 +11,7 @@ from app.db.crud.user_repo import UserRepository
 
 
 class UserService:
-    def __init__(self, repo_factory: RepositoryFactory = Depends(get_repository_factory)):
+    def __init__(self, repo_factory: RepositoryFactory):
         self.factory = repo_factory
         self.user_repo: UserRepository = self.factory.get_repo_by_type(UserRepository)
 
@@ -67,3 +67,9 @@ class UserService:
     async def lock_user(self, user):
         user.is_locked = True
         await self.user_repo.update(user.id, user)
+
+    async def get_by_id_with_roles_permissions(self, user_id: UUID) -> User:
+        user = await self.user_repo.get_by_id_with_roles_permissions(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user

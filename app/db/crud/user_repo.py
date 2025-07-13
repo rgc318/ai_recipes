@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import selectinload
 
 from app.models.user import User
 from app.schemas.user_schemas import UserCreate, UserUpdate
@@ -94,3 +95,14 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         except Exception as e:
             await self.db.rollback()
             raise e
+
+    async def get_by_id_with_roles_permissions(self, user_id: UUID) -> Optional[User]:
+        statement = (
+            select(User)
+            .where(User.id == user_id)
+            .options(
+                selectinload(User.roles).selectinload(lambda r: r.permissions)
+            )
+        )
+        result = await self.session.exec(statement)
+        return result.first()

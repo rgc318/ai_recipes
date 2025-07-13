@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.api.router import api_router
+from app.core.security.middleware import AuditMiddleware
 from app.db.session import create_db_and_tables
 from contextlib import asynccontextmanager
 from app.core.logger import logger
@@ -78,5 +79,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 #     print(f"Handled event: {event.name}, payload: {event.payload}")
 
 # event_bus.subscribe("SomeCreated", handle_some_created)
+
+# @app.middleware("http")
+# async def audit_middleware(request: Request, call_next):
+#     # 记录审计日志
+#     response = await call_next(request)
+#     return response
+app.add_middleware(AuditMiddleware)
 app.include_router(api_router)
 logger.info(app.routes)

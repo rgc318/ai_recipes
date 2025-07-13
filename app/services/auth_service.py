@@ -11,7 +11,7 @@ from app.db.crud.user_repo import UserRepository
 from app.models import User
 from app.schemas.user_schemas import UserCreate, PrivateUser
 from app.core.security.password_utils import get_password_hash, verify_password
-from app.utils.jwt_utils import create_access_token
+from app.utils.jwt_utils import create_access_token, decode_token, revoke_token
 from app.services.user_service import UserService
 from app.enums.auth_method import AuthMethod
 from app.core.global_exception import UserLockedOut
@@ -85,3 +85,18 @@ class AuthService:
         await self.user_repo.update(user.id, {"hashed_password": hashed_password})
         return True
 
+    async def logout_user(self, token: str) -> bool:
+        """
+        退出登录：撤销当前 token
+        """
+        try:
+            payload = await decode_token(token)
+            jti = payload.get("jti")
+            exp = payload.get("exp")
+            if not jti or not exp:
+                raise HTTPException(status_code=400, detail="Invalid token payload")
+            expires_in = int(exp - datetime.now().timestamp())
+            await revoke_token(jti, expires_in=expires_in)
+            return True
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Logout failed: {str(e)}")
