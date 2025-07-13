@@ -77,6 +77,8 @@ class CredentialsRequest(BaseModel):
     username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
     remember_me: bool = Field(default=False)
+    captcha: Optional[bool] = Field(default=None, description="验证码校验结果")
+    select_account: Optional[str] = Field(default=None, description="选择的账户")
 
 class PrivateUser(BaseModel):
     id: UUID

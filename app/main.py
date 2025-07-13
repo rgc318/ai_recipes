@@ -86,5 +86,5 @@ async def global_exception_handler(request: Request, exc: Exception):
 #     response = await call_next(request)
 #     return response
 app.add_middleware(AuditMiddleware)
-app.include_router(api_router)
+app.include_router(api_router, prefix=settings.server.api_prefix)
 logger.info(app.routes)

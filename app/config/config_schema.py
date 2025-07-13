@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
-
+    api_prefix : str = "/api/v1"
 class DatabaseConfig(BaseModel):
     url: str
 
@@ -51,7 +51,6 @@ class RedisConfig(BaseModel):
     def url(self):
         auth_part = f":{self.password}@" if self.password else ""
         return f"redis://{auth_part}{self.host}:{self.port}/{self.db}"
-
 
 
 class AppConfig(BaseModel):
