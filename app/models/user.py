@@ -22,13 +22,13 @@ class Role(BaseModel, table=True):
     description: Optional[str] = None
 
     users: List["User"] = Relationship(back_populates="roles", link_model=UserRole)
-    permissions: List["Permission"] = Relationship(back_populates="roles", link_model="RolePermission")
+    permissions: List["Permission"] = Relationship(back_populates="roles", link_model=RolePermission)
 
 class Permission(BaseModel, table=True):
     name: str
     description: Optional[str] = None
 
-    roles: List["Role"] = Relationship(back_populates="permissions", link_model="RolePermission")
+    roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)
 class User(BaseModel, table=True):
     __tablename__ = "user"
     __pydantic_model__ = UserRead
