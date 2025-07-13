@@ -63,19 +63,13 @@ async def register_user(
     status_code=status.HTTP_200_OK,
 )
 async def login_user(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    remember_me: bool = Body(default=False),
+    data: CredentialsRequest,
     service: AuthService = Depends(get_auth_service)
 ):
     try:
-        credentials = CredentialsRequest(
-            username=form_data.username,
-            password=form_data.password,
-            remember_me=remember_me,
-        )
         token, expires = await service.login_user(
             method=AuthMethod.app,
-            data=credentials,
+            data=data,
         )
         expires_at = datetime.now(timezone.utc) + expires
         return response_success(
