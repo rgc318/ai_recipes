@@ -1,14 +1,34 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Set, List
 from uuid import UUID, uuid4
 
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Relationship
 
 from app.enums.auth_method import AuthMethod
 from app.models.base.base_model import BaseModel
 from app.schemas.user_schemas import UserRead
 
 
+class UserRole(BaseModel, table=True):
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
+    role_id: UUID = Field(foreign_key="role.id", primary_key=True)
+
+class RolePermission(BaseModel, table=True):
+    role_id: UUID = Field(foreign_key="role.id", primary_key=True)
+    permission_id: UUID = Field(foreign_key="permission.id", primary_key=True)
+
+class Role(BaseModel, table=True):
+    name: str
+    description: Optional[str] = None
+
+    users: List["User"] = Relationship(back_populates="roles", link_model=UserRole)
+    permissions: List["Permission"] = Relationship(back_populates="roles", link_model="RolePermission")
+
+class Permission(BaseModel, table=True):
+    name: str
+    description: Optional[str] = None
+
+    roles: List["Role"] = Relationship(back_populates="permissions", link_model="RolePermission")
 class User(BaseModel, table=True):
     __tablename__ = "user"
     __pydantic_model__ = UserRead
@@ -30,6 +50,16 @@ class User(BaseModel, table=True):
 
     last_login_at: Optional[datetime] = None
     login_count: int = Field(default=0)
+
+    roles: List["Role"] = Relationship(back_populates="users", link_model=UserRole)
+
+    @property
+    def permissions(self) -> Set[str]:
+        perms = set()
+        for role in self.roles:
+            for perm in role.permissions:
+                perms.add(perm.name)
+        return perms
 
 class UserAuth(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -65,21 +95,10 @@ class UserLoginLog(BaseModel, table=True):
     user_agent: Optional[str] = None
     login_at: datetime = Field(default_factory=datetime.utcnow)
 
-class Role(BaseModel, table=True):
-    name: str
-    description: Optional[str] = None
 
-class Permission(BaseModel, table=True):
-    name: str
-    description: Optional[str] = None
 
-class UserRole(BaseModel, table=True):
-    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
-    role_id: UUID = Field(foreign_key="role.id", primary_key=True)
 
-class RolePermission(BaseModel, table=True):
-    role_id: UUID = Field(foreign_key="role.id", primary_key=True)
-    permission_id: UUID = Field(foreign_key="permission.id", primary_key=True)
+
 
 class UserPreference(BaseModel, table=True):
     user_id: UUID = Field(foreign_key="user.id", primary_key=True)
@@ -116,3 +135,4 @@ class UserActionLog(BaseModel, table=True):
     target_type: Optional[str] = None  # e.g., "Recipe", "Comment"
     extra_data: Optional[str] = None
     # created_at: datetime = Field(default_factory=datetime.utcnow)
+

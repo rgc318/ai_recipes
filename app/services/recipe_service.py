@@ -11,7 +11,7 @@ from app.db.crud.recipe_repo import RecipeRepository
 
 
 class RecipeService:
-    def __init__(self, factory: RepositoryFactory = Depends(get_repository_factory)):
+    def __init__(self, factory: RepositoryFactory):
         self.factory = factory
         self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)
 

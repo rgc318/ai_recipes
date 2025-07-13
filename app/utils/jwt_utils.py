@@ -7,12 +7,12 @@ import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError, PyJWTError
 
 from app.config.settings import settings
-from app.utils.redis_client import RedisClient  # ✅ 修改这里
+from app.utils.redis_client import RedisClient
 from app.core.global_exception import UnauthorizedException
 
 ALGORITHM = settings.security_settings.jwt_algorithm or "HS256"
 ISSUER = settings.security_settings.jwt_issuer or "ai-recipes"
-AUDIENCE = settings.security_settings.jwt_audience or None  # 可选
+AUDIENCE = settings.security_settings.jwt_audience or None
 
 # =====================
 # 自定义异常
@@ -44,7 +44,7 @@ def create_token(
     token_type: Literal["access", "refresh"] = "access",
 ) -> Tuple[str, timedelta, str]:
     """
-    返回 token, expires_delta, jti
+    返回 (token, expires_delta, jti)
     """
     now = datetime.now(UTC)
     expire = now + expires_delta
@@ -77,10 +77,11 @@ async def decode_token(token: str) -> dict:
             issuer=ISSUER,
             audience=AUDIENCE if AUDIENCE else None,
         )
-        # 检查 revoke
-        jti = payload.get("jti")
-        if jti and await is_token_revoked(jti):
-            raise TokenRevokedException()
+        # 检查 access token 是否被 revoke
+        if payload.get("type") == "access":
+            jti = payload.get("jti")
+            if jti and await is_token_revoked(jti):
+                raise TokenRevokedException()
         return payload
     except ExpiredSignatureError:
         raise TokenExpiredException()
@@ -98,25 +99,56 @@ def validate_token_type(payload: dict, expected: str):
         raise TokenTypeMismatchException(message=f"应为 {expected}")
 
 # =====================
-# 快捷封装
+# Access Token
 # =====================
 
 def create_access_token(data: dict, remember_me=False) -> Tuple[str, timedelta, str]:
     """
-    创建 access token。
-
-    Args:
-        data: 要编码进 token 的数据，如 {"sub": user_id}
-        remember_me: 如果为 True，则 token 有效期为 14 天，否则为默认设置时间
-
-    Returns:
-        (token 字符串, 过期时间, jti)
+    创建 access token (无状态，不存 Redis)
     """
     delta = timedelta(days=14) if remember_me else timedelta(minutes=settings.security_settings.token_expire_minutes)
     return create_token(data, delta, "access")
 
-def create_refresh_token(data: dict) -> Tuple[str, timedelta, str]:
-    return create_token(data, timedelta(days=7), "refresh")
+# =====================
+# Refresh Token
+# =====================
+
+async def create_refresh_token(data: dict, user_id: str) -> Tuple[str, timedelta, str]:
+    """
+    创建 refresh token 并存储到 Redis
+    """
+    token, expires_delta, jti = create_token(data, timedelta(days=7), "refresh")
+
+    redis = RedisClient.get_client()
+    key = f"refresh:{user_id}:{jti}"
+    await redis.set(
+        key,
+        token,
+        ex=int(expires_delta.total_seconds())
+    )
+    return token, expires_delta, jti
+
+# =====================
+# Refresh Token rotation
+# =====================
+
+async def rotate_refresh_token(old_jti: str, user_id: str, data: dict) -> Tuple[str, timedelta, str]:
+    """
+    撤销旧 refresh token（删除 Redis key），生成新 refresh token
+    """
+    redis = RedisClient.get_client()
+    old_key_pattern = f"refresh:{user_id}:{old_jti}"
+
+    # 检查旧 token 是否存在（防止被重复使用）
+    exists = await redis.exists(old_key_pattern)
+    if not exists:
+        raise InvalidTokenException(message="Refresh Token 已被使用或无效")
+
+    # 删除旧 token
+    await redis.delete(old_key_pattern)
+
+    # 生成新 token
+    return await create_refresh_token(data, user_id)
 
 # =====================
 # Token revoke / blacklist
@@ -124,28 +156,15 @@ def create_refresh_token(data: dict) -> Tuple[str, timedelta, str]:
 
 async def revoke_token(jti: str, expires_in: Optional[int] = None):
     """
-    将 jti 加入 Redis blacklist
+    将 access token jti 加入 Redis blacklist
     """
-    redis = RedisClient.get_client()  # ✅ 修改为直接获取 Redis 实例
-    ex = expires_in or (7 * 24 * 3600)  # 默认 7 天
+    redis = RedisClient.get_client()
+    ex = expires_in or (7 * 24 * 3600)
     await redis.set(f"revoked:{jti}", "1", ex=ex)
 
 async def is_token_revoked(jti: str) -> bool:
     """
-    检查 jti 是否被撤销
+    检查 access token jti 是否被撤销
     """
-    redis = RedisClient.get_client()  # ✅ 修改为直接获取 Redis 实例
+    redis = RedisClient.get_client()
     return await redis.exists(f"revoked:{jti}") == 1
-
-# =====================
-# Refresh Token rotation
-# =====================
-
-async def rotate_refresh_token(old_jti: str, data: dict) -> Tuple[str, timedelta, str]:
-    """
-    撤销旧 refresh token，生成新 refresh token
-    """
-    if await is_token_revoked(old_jti):
-        raise InvalidTokenException(message="Refresh Token 已被使用")
-    await revoke_token(old_jti)
-    return create_refresh_token(data)

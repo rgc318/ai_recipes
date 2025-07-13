@@ -16,6 +16,7 @@ from app.schemas.auth_schemas import (
     ResetPasswordRequest,
 )
 from app.core.api_response import response_success, response_error, StandardResponse
+from app.api.dependencies.services import get_auth_service
 from app.core.response_codes import ResponseCodeEnum
 from app.core.logger import logger
 from app.core.global_exception import UserLockedOut
@@ -24,8 +25,8 @@ router = APIRouter()
 
 
 # === Dependencies ===
-def get_auth_service(session: AsyncSession = Depends(get_session)) -> AuthService:
-    return AuthService(RepositoryFactory(session))
+# def get_auth_service(session: AsyncSession = Depends(get_session)) -> AuthService:
+#     return AuthService(RepositoryFactory(session))
 
 
 # === Register ===

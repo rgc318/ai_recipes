@@ -3,6 +3,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, status, Query
 from app.services.recipe_service import RecipeService
+from app.api.dependencies.services import get_recipes_service
 from app.schemas.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeRead
 from app.core.api_response import response_success, response_error
 from app.core.response_codes import ResponseCodeEnum
@@ -20,7 +21,7 @@ async def read_recipes(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, le=100),
     search: str = Query("", alias="q"),
-    service: RecipeService = Depends(),
+    service: RecipeService = Depends(get_recipes_service),
 ):
     recipes = await service.list_recipes_paginated(page=page, per_page=per_page, search=search)
     return response_success(data=recipes)
@@ -32,7 +33,7 @@ async def read_recipes(
     response_model=StandardResponse[RecipeRead],
     summary="获取菜谱详情",
 )
-async def read_recipe(recipe_id: UUID, service: RecipeService = Depends()):
+async def read_recipe(recipe_id: UUID, service: RecipeService = Depends(get_recipes_service)):
     recipe = await service.get_by_id(recipe_id)
     if not recipe:
         return response_error(ResponseCodeEnum.NOT_FOUND, "Recipe not found", status.HTTP_404_NOT_FOUND)
@@ -48,7 +49,7 @@ async def read_recipe(recipe_id: UUID, service: RecipeService = Depends()):
 )
 async def create_recipe(
     recipe_data: RecipeCreate,
-    service: RecipeService = Depends(),
+    service: RecipeService = Depends(get_recipes_service),
     user_id: UUID = None,  # ✨ 可接入 Auth 系统，获取当前用户
 ):
     created = await service.create(recipe_data, created_by=user_id)
@@ -69,7 +70,7 @@ async def create_recipe(
 async def update_recipe(
     recipe_id: UUID,
     update_data: RecipeUpdate,
-    service: RecipeService = Depends(),
+    service: RecipeService = Depends(get_recipes_service),
     user_id: UUID = None,
 ):
     updated = await service.update(recipe_id, update_data, updated_by=user_id)
@@ -87,7 +88,7 @@ async def update_recipe(
 )
 async def delete_recipe(
     recipe_id: UUID,
-    service: RecipeService = Depends(),
+    service: RecipeService = Depends(get_recipes_service),
     user_id: UUID = None,
 ):
     success = await service.delete(recipe_id, deleted_by=user_id)
