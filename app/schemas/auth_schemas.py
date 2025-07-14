@@ -17,3 +17,11 @@ class ChangePasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
     new_password: str
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+class AuthTokenBundleResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_at: datetime

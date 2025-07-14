@@ -17,6 +17,7 @@ class ServerConfig(BaseModel):
     port: int = 8000
     log_level: str = "info"
     api_prefix : str = "/api/v1"
+    env : str = "dev"
 class DatabaseConfig(BaseModel):
     url: str
 

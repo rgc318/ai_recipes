@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import selectinload
 
-from app.models.user import User
+from app.models.user import User, Role
 from app.schemas.user_schemas import UserCreate, UserUpdate
 from app.db.crud.base_repo import BaseRepository
 
@@ -97,12 +97,12 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             raise e
 
     async def get_by_id_with_roles_permissions(self, user_id: UUID) -> Optional[User]:
-        statement = (
+        stmt = (
             select(User)
             .where(User.id == user_id)
             .options(
-                selectinload(User.roles).selectinload(lambda r: r.permissions)
+                selectinload(User.roles).selectinload(Role.permissions)
             )
         )
-        result = await self.session.exec(statement)
-        return result.first()
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

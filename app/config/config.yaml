@@ -3,6 +3,7 @@ server:
   port: 8000
   log_level: "info"
   api_prefix: '/api/v1'  # 示例内容，根据实际需求填充
+  env: "dev"
 database:
   url: "postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
