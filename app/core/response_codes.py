@@ -4,6 +4,7 @@ from enum import Enum
 class ResponseCodeEnum(Enum):
 
     # === 通用响应码 ===
+
     SUCCESS = (0, "请求成功")
     CREATED = (201, "资源创建成功")
     VALIDATION_ERROR = (40001, "参数验证失败")
@@ -28,6 +29,8 @@ class ResponseCodeEnum(Enum):
     TOKEN_INVALID = (40105, "无效 Token")
     TOKEN_REVOKED = (40106, "Token 已被吊销")
     TOKEN_TYPE_MISMATCH = (40107, "Token 类型不匹配")
+    LOGOUT_FAILED = (40108, "登出失败")
+    TOKEN_REFRESH_FAILED = (40109, "token刷新失败")
     def __init__(self, code: int, message: str):
         self._code = code
         self._message = message

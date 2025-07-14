@@ -1,4 +1,4 @@
-import abc
+from abc import ABC, abstractmethod
 from datetime import timedelta
 from typing import TypeVar, Generic, Optional
 
@@ -11,7 +11,7 @@ from app.enums.auth_method import AuthMethod
 T = TypeVar("T")  # 泛型参数：用于接受各种认证请求数据，如密码、验证码等
 
 
-class AuthProvider(Generic[T], metaclass=abc.ABCMeta):
+class AuthProvider(ABC, Generic[T]):
     """
     抽象认证提供器基类，用于定义统一认证接口与通用工具函数。
     子类如 CredentialsProvider、EmailCodeProvider 应继承此类。
@@ -54,9 +54,14 @@ class AuthProvider(Generic[T], metaclass=abc.ABCMeta):
         self._cached_user = user
         return user
 
-    @abc.abstractmethod
+    @abstractmethod
     async def authenticate(self) -> Optional[tuple[str, timedelta]]:
         """
         子类必须实现的认证方法。返回 (token, expires) 或 None 表示认证失败。
         """
         raise NotImplementedError("Subclasses must implement this method.")
+
+    @abstractmethod
+    async def get_user(self) -> Optional[PrivateUser]:
+        """必须由子类实现"""
+        raise NotImplementedError("This provider does not support get_user()")

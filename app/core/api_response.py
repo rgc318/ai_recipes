@@ -12,6 +12,26 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
+# 【新增】步骤一：创建一个可重用的、内部的 Cookie 处理函数
+def _apply_cookie_modifications(
+    response: JSONResponse,
+    set_cookies: Optional[List[Dict[str, Any]]] = None,
+    delete_cookies: Optional[List[str]] = None,
+):
+    """
+    一个内部辅助函数，用于在给定的 Response 对象上应用 cookie 的设置和删除操作。
+    """
+    # 设置新的 cookies
+    if set_cookies:
+        for cookie_params in set_cookies:
+            cookie_key = cookie_params.pop('key', None)
+            if cookie_key is not None:
+                response.set_cookie(key=cookie_key, **cookie_params)
+
+    # 删除指定的 cookies
+    if delete_cookies:
+        for cookie_key in delete_cookies:
+            response.delete_cookie(key=cookie_key)
 
 # === Generic Pydantic Response Schema ===
 class StandardResponse(BaseModel, Generic[T]):
@@ -58,7 +78,9 @@ def response_success(
     code: ResponseCodeEnum = ResponseCodeEnum.SUCCESS,
     http_status: int = 200,
     message: Optional[str] = None,
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None,
+    set_cookies: Optional[List[Dict[str, Any]]] = None, # 参数名改为更明确的 set_cookies
+    delete_cookies: Optional[List[str]] = None,      # 新增 delete_cookies 参数
 ) -> JSONResponse:
     final_message = message or code.message
     logger.debug(f"Response Success | code: {code.code}, message: {final_message}")
@@ -74,7 +96,8 @@ def response_success(
         logger.exception("Error serializing response data")
         encoded_data = str(data)
 
-    return JSONResponse(
+    # 1. 先创建 JSONResponse 对象
+    response = JSONResponse(
         status_code=http_status,
         content={
             "code": code.code,
@@ -83,19 +106,24 @@ def response_success(
         },
         headers=headers
     )
-
+    # 【修改】步骤二：统一调用内部辅助函数
+    _apply_cookie_modifications(response, set_cookies, delete_cookies)
+    # 3. 返回被修改过的 response 对象
+    return response
 
 # === 错误响应 ===
 def response_error(
     code: ResponseCodeEnum,
     http_status: int = 200,
     message: Optional[str] = None,
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None,
+    set_cookies: Optional[List[Dict[str, Any]]] = None, # 新增 set_cookies 参数
+    delete_cookies: Optional[List[str]] = None,
 ) -> JSONResponse:
     final_message = message or code.message
     logger.warning(f"Response Error | http_status: {http_status}, code: {code.code}, message: {final_message}")
 
-    return JSONResponse(
+    response = JSONResponse(
         status_code=http_status,
         content={
             "code": code.code,
@@ -104,3 +132,8 @@ def response_error(
         },
         headers=headers
     )
+
+    # 【修改】步骤二：统一调用内部辅助函数
+    _apply_cookie_modifications(response, set_cookies, delete_cookies)
+
+    return response

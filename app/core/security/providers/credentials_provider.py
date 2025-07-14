@@ -1,4 +1,6 @@
 from datetime import timedelta, datetime
+from typing import Optional
+
 from app.core.logger import get_logger
 from app.config import settings
 from app.core.security.hasher import get_hasher
@@ -15,6 +17,7 @@ logger = get_logger("credentials_provider")
 class CredentialsProvider(AuthProvider[CredentialsRequest]):
     def __init__(self, repo_factory: RepositoryFactory, data: CredentialsRequest):
         super().__init__(repo_factory=repo_factory, data=data)
+        self._user: PrivateUser | None = None  # ✅ 实例变量
 
     async def authenticate(self) -> tuple[str, timedelta] | None:
         user = await self.get_user_by_identity(self.data.username)
@@ -22,7 +25,7 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
         if not user:
             await self._verify_fake_password()
             return None
-
+        self._user = user  # 缓存起来
         if self._is_locked(user):
             raise UserLockedOutException()
 
@@ -33,6 +36,8 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
         await self._handle_successful_login(user)
         return self.get_access_token(user, remember_me=self.data.remember_me)
 
+    async def get_user(self) -> Optional[PrivateUser]:
+        return self._user
     # ==== 内部工具函数 ====
 
     def _validate_auth_method(self, user: PrivateUser) -> bool:

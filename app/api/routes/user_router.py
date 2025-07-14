@@ -13,6 +13,25 @@ from app.core.response_codes import ResponseCodeEnum
 
 router = APIRouter()
 
+
+@router.get(
+    "/info",
+    response_model=StandardResponse[UserRead],
+    summary="获取当前用户信息",
+    status_code=status.HTTP_200_OK,
+)
+async def get_user_info(
+    current_user: UserRead = Depends(get_current_user),
+    service: UserService = Depends(get_user_service),
+):
+    user = await service.get_by_id(current_user.id)
+    if not user:
+        return response_error(
+            code=ResponseCodeEnum.USER_NOT_FOUND,
+            message="用户不存在",
+        )
+    return response_success(data=UserRead.model_validate(user), message="获取用户信息成功")
+
 # === Create User ===
 @router.post(
     "/",
@@ -80,20 +99,3 @@ async def delete_user(user_id: UUID, service: UserService = Depends(get_user_ser
     return response_success(data=None, message="用户已删除")
 
 
-@router.get(
-    "/user/info",
-    response_model=StandardResponse[UserRead],
-    summary="获取当前用户信息",
-    status_code=status.HTTP_200_OK,
-)
-async def get_user_info(
-    current_user: UserRead = Depends(get_current_user),
-    service: UserService = Depends(get_user_service),
-):
-    user = await service.get_by_id(current_user.id)
-    if not user:
-        return response_error(
-            code=ResponseCodeEnum.USER_NOT_FOUND,
-            message="用户不存在",
-        )
-    return response_success(data=UserRead.model_validate(user), message="获取用户信息成功")
