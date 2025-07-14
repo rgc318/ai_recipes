@@ -3,11 +3,10 @@ from app.core.logger import get_logger
 from app.config import settings
 from app.core.security.hasher import get_hasher
 from app.core.security.providers.auth_provider import AuthProvider
-from app.core.global_exception import UserLockedOut
+from app.core.exceptions import UserLockedOutException
 from app.db.repository_factory_auto import RepositoryFactory
 from app.schemas.user_schemas import CredentialsRequest, PrivateUser
 from app.services.user_service import UserService
-from app.db.get_repo_factory import get_repository_factory
 from app.enums.auth_method import AuthMethod
 
 logger = get_logger("credentials_provider")
@@ -25,7 +24,7 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
             return None
 
         if self._is_locked(user):
-            raise UserLockedOut()
+            raise UserLockedOutException()
 
         if not self._verify_password(self.data.password, user.hashed_password):
             await self._handle_failed_login(user)

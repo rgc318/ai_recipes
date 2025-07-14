@@ -1,21 +1,19 @@
 import datetime
-from typing import Optional, Type
+from typing import Type
 from uuid import UUID
 from datetime import datetime, timedelta
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from app.db.repository_factory_auto import RepositoryFactory
 from app.db.crud.user_repo import UserRepository
 from app.models import User
-from app.schemas.user_schemas import UserCreate, PrivateUser
+from app.schemas.user_schemas import UserCreate
 from app.core.security.password_utils import get_password_hash, verify_password
-from app.utils.jwt_utils import create_access_token, decode_token, revoke_token
-from app.services.user_service import UserService
+from app.utils.jwt_utils import decode_token, revoke_token
 from app.enums.auth_method import AuthMethod
-from app.core.global_exception import UserLockedOut, UserAlreadyExistsException
-from app.config import settings
+from app.core.exceptions import UserLockedOutException, UserAlreadyExistsException
 from app.core.security.providers import AuthProvider, CredentialsProvider
 
 # === 登录方式注册表（未来支持更多方式在此扩展）===

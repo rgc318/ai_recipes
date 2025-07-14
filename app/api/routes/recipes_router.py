@@ -36,7 +36,7 @@ async def read_recipes(
 async def read_recipe(recipe_id: UUID, service: RecipeService = Depends(get_recipes_service)):
     recipe = await service.get_by_id(recipe_id)
     if not recipe:
-        return response_error(ResponseCodeEnum.NOT_FOUND, "Recipe not found", status.HTTP_404_NOT_FOUND)
+        return response_error(code=ResponseCodeEnum.NOT_FOUND, message="Recipe not found")
     return response_success(data=recipe)
 
 
@@ -44,7 +44,7 @@ async def read_recipe(recipe_id: UUID, service: RecipeService = Depends(get_reci
 @router.post(
     "/",
     response_model=StandardResponse[RecipeRead],
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     summary="创建菜谱",
 )
 async def create_recipe(
@@ -57,7 +57,6 @@ async def create_recipe(
         data=created,
         code=ResponseCodeEnum.CREATED,
         message="Recipe created successfully",
-        http_status=status.HTTP_201_CREATED,
     )
 
 
@@ -75,7 +74,7 @@ async def update_recipe(
 ):
     updated = await service.update(recipe_id, update_data, updated_by=user_id)
     if not updated:
-        return response_error(ResponseCodeEnum.NOT_FOUND, "Recipe not found", status.HTTP_404_NOT_FOUND)
+        return response_error(code=ResponseCodeEnum.NOT_FOUND, message="Recipe not found")
     return response_success(data=updated, message="Recipe updated successfully")
 
 
@@ -93,5 +92,5 @@ async def delete_recipe(
 ):
     success = await service.delete(recipe_id, deleted_by=user_id)
     if not success:
-        return response_error(ResponseCodeEnum.NOT_FOUND, "Recipe not found", status.HTTP_404_NOT_FOUND)
-    return response_success(code=ResponseCodeEnum.NO_CONTENT, message="Recipe deleted successfully", data=None)
+        return response_error(code=ResponseCodeEnum.NOT_FOUND, message="Recipe not found")
+    return response_success(message="Recipe deleted successfully", data=None)

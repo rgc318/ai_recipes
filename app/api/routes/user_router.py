@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security.security import get_current_user
 from app.db.session import get_session
 from app.services.user_service import UserService
 from app.api.dependencies.services import get_user_service
@@ -24,14 +25,12 @@ async def create_user(user_data: UserCreate, service: UserService = Depends(get_
         return response_success(
             data=user,
             code=ResponseCodeEnum.CREATED,
-            message="用户创建成功",
-            http_status=status.HTTP_201_CREATED
+            message="用户创建成功"
         )
     except ValueError as e:
         return response_error(
             code=ResponseCodeEnum.USER_ALREADY_EXISTS,
-            message=str(e),
-            http_status=status.HTTP_400_BAD_REQUEST
+            message=str(e)
         )
 
 
@@ -46,7 +45,6 @@ async def read_user(user_id: UUID, service: UserService = Depends(get_user_servi
         return response_error(
             code=ResponseCodeEnum.USER_NOT_FOUND,
             message="用户不存在",
-            http_status=status.HTTP_404_NOT_FOUND
         )
     return response_success(data=UserRead.model_validate(user))
 
@@ -62,7 +60,6 @@ async def update_user(user_id: UUID, user_data: UserUpdate, service: UserService
         return response_error(
             code=ResponseCodeEnum.USER_NOT_FOUND,
             message="用户更新失败，用户不存在",
-            http_status=status.HTTP_404_NOT_FOUND
         )
     return response_success(data=updated_user, message="用户更新成功")
 
@@ -79,6 +76,24 @@ async def delete_user(user_id: UUID, service: UserService = Depends(get_user_ser
         return response_error(
             code=ResponseCodeEnum.USER_NOT_FOUND,
             message="用户删除失败，用户不存在",
-            http_status=status.HTTP_404_NOT_FOUND
         )
     return response_success(data=None, message="用户已删除")
+
+
+@router.get(
+    "/user/info",
+    response_model=StandardResponse[UserRead],
+    summary="获取当前用户信息",
+    status_code=status.HTTP_200_OK,
+)
+async def get_user_info(
+    current_user: UserRead = Depends(get_current_user),
+    service: UserService = Depends(get_user_service),
+):
+    user = await service.get_by_id(current_user.id)
+    if not user:
+        return response_error(
+            code=ResponseCodeEnum.USER_NOT_FOUND,
+            message="用户不存在",
+        )
+    return response_success(data=UserRead.model_validate(user), message="获取用户信息成功")
