@@ -88,7 +88,7 @@ def response_success(
 # === 错误响应 ===
 def response_error(
     code: ResponseCodeEnum,
-    http_status: int = 400,
+    http_status: int = 200,
     message: Optional[str] = None,
     headers: Optional[Dict[str, str]] = None
 ) -> JSONResponse:

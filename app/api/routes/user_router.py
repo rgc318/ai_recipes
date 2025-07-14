@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post(
     "/",
     response_model=StandardResponse[UserRead],
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_200_OK
 )
 async def create_user(user_data: UserCreate, service: UserService = Depends(get_user_service)):
     try:
@@ -48,7 +48,7 @@ async def read_user(user_id: UUID, service: UserService = Depends(get_user_servi
             message="用户不存在",
             http_status=status.HTTP_404_NOT_FOUND
         )
-    return response_success(data=user)
+    return response_success(data=UserRead.model_validate(user))
 
 
 # === Update User ===

@@ -14,7 +14,7 @@ from app.core.security.password_utils import get_password_hash, verify_password
 from app.utils.jwt_utils import create_access_token, decode_token, revoke_token
 from app.services.user_service import UserService
 from app.enums.auth_method import AuthMethod
-from app.core.global_exception import UserLockedOut
+from app.core.global_exception import UserLockedOut, UserAlreadyExistsException
 from app.config import settings
 from app.core.security.providers import AuthProvider, CredentialsProvider
 
@@ -33,7 +33,7 @@ class AuthService:
 
     async def register_user(self, user_in: UserCreate) -> User:
         if await self.user_repo.get_by_username(user_in.username):
-            raise HTTPException(status_code=400, detail="Username already exists")
+            raise UserAlreadyExistsException()
 
         if user_in.email and await self.user_repo.get_by_email(user_in.email):
             raise HTTPException(status_code=400, detail="Email already exists")
