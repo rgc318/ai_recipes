@@ -5,10 +5,8 @@ from app.core.security.middleware import AuditMiddleware
 from app.db.session import create_db_and_tables
 from contextlib import asynccontextmanager
 from app.core.logger import logger
-from app.core.global_exception import BaseBusinessException
+from app.core.exceptions.base_exception import BaseBusinessException
 from app.core.response_codes import ResponseCodeEnum
-from app.domain.event_bus import event_bus
-from app.domain.events import DomainEvent
 from app.config.settings import settings
 from app.utils.redis_client import RedisClient
 

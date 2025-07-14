@@ -31,10 +31,10 @@ async def upload_avatar(
         return response_success(data=result, message="Avatar uploaded successfully")
     except HTTPException as e:
         logger.error(f"Failed to upload avatar for user {user_id}: {e.detail}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message=e.detail)
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
     except Exception as e:
         logger.error(f"Unexpected error during avatar upload for user {user_id}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Unexpected error during avatar upload")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during avatar upload")
 
 
 # 上传菜谱图片
@@ -48,10 +48,10 @@ async def upload_recipe_image(
         return response_success(data=result, message="Recipe image uploaded successfully")
     except HTTPException as e:
         logger.error(f"Failed to upload recipe image for recipe {recipe_id}: {e.detail}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message=e.detail)
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
     except Exception as e:
         logger.error(f"Unexpected error during recipe image upload for recipe {recipe_id}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Unexpected error during recipe image upload")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during recipe image upload")
 
 
 # 通用文件上传
@@ -65,10 +65,10 @@ async def upload_general(
         return response_success(data=result, message="File uploaded successfully")
     except HTTPException as e:
         logger.error(f"Failed to upload file to {folder}: {e.detail}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message=e.detail)
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
     except Exception as e:
         logger.error(f"Unexpected error during general file upload to {folder}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Unexpected error during file upload")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during file upload")
 
 
 # 删除文件
@@ -81,10 +81,10 @@ async def delete_file(
         return response_success(message=f"File {key} deleted successfully")
     except HTTPException as e:
         logger.error(f"Failed to delete file {key}: {e.detail}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message=e.detail)
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
     except Exception as e:
         logger.error(f"Unexpected error during file deletion for {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Unexpected error during file deletion")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during file deletion")
 
 
 # 文件是否存在
@@ -97,7 +97,7 @@ async def file_exists(
         return response_success(data=FileExistsResponse(exists=exists))
     except Exception as e:
         logger.error(f"Failed to check existence of file {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Failed to check file existence")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to check file existence")
 
 
 # 列出文件
@@ -110,7 +110,7 @@ async def list_files(
         return response_success(data={"files": files})
     except Exception as e:
         logger.error(f"Failed to list files with prefix {prefix}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Failed to list files")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to list files")
 
 
 # 生成预签名下载URL
@@ -125,7 +125,7 @@ async def generate_download_url(
         return response_success(data={"download_url": url})
     except Exception as e:
         logger.error(f"Failed to generate download URL for {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Failed to generate download URL")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to generate download URL")
 
 
 # 生成预签名上传URL
@@ -139,4 +139,4 @@ async def generate_upload_url(
         return response_success(data={"upload_url": url})
     except Exception as e:
         logger.error(f"Failed to generate upload URL for {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.INTERNAL_ERROR, message="Failed to generate upload URL")
+        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to generate upload URL")

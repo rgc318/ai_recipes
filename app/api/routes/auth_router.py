@@ -1,12 +1,6 @@
 from datetime import datetime, timezone
-from uuid import UUID
-from fastapi import APIRouter, Depends, status, Body
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Annotated
+from fastapi import APIRouter, Depends, status
 
-from app.db.session import get_session
-from app.db.repository_factory_auto import RepositoryFactory
 from app.enums.auth_method import AuthMethod
 from app.services.auth_service import AuthService
 from app.schemas.user_schemas import UserCreate, CredentialsRequest, UserRead
@@ -19,7 +13,7 @@ from app.core.api_response import response_success, response_error, StandardResp
 from app.api.dependencies.services import get_auth_service
 from app.core.response_codes import ResponseCodeEnum
 from app.core.logger import logger
-from app.core.global_exception import UserLockedOut
+from app.core.exceptions import UserLockedOutException
 
 router = APIRouter()
 
@@ -73,18 +67,16 @@ async def login_user(
             data=AuthTokenResponse(access_token=token, expires_at=expires_at),
             message="登录成功",
         )
-    except UserLockedOut:
+    except UserLockedOutException:
         return response_error(
             code=ResponseCodeEnum.USER_LOCKED_OUT,
             message="用户账户已被锁定，请稍后重试",
-            http_status=status.HTTP_403_FORBIDDEN,
         )
     except Exception as e:
         logger.warning(f"登录失败: {str(e)}")
         return response_error(
             code=ResponseCodeEnum.LOGIN_FAILED,
             message="用户名或密码错误",
-            http_status=status.HTTP_401_UNAUTHORIZED,
         )
 
 
@@ -110,9 +102,8 @@ async def change_password(
     except Exception as e:
         logger.warning(f"密码修改失败: {str(e)}")
         return response_error(
-            code=ResponseCodeEnum.CHANGE_PASSWORD_FAILED,
+            code=ResponseCodeEnum.USER_UPDATE_FAILED.code,
             message=str(e),
-            http_status=status.HTTP_400_BAD_REQUEST,
         )
 
 
@@ -137,7 +128,6 @@ async def reset_password(
     except Exception as e:
         logger.warning(f"密码重置失败: {str(e)}")
         return response_error(
-            code=ResponseCodeEnum.RESET_PASSWORD_FAILED,
+            code=ResponseCodeEnum.USER_UPDATE_FAILED.code,
             message=str(e),
-            http_status=status.HTTP_400_BAD_REQUEST,
         )

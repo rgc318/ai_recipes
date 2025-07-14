@@ -2,6 +2,8 @@ from uuid import UUID
 from fastapi import HTTPException, Depends
 from starlette import status
 
+from app.core.exceptions import UserNotFoundException
+from app.core.response_codes import ResponseCodeEnum
 from app.db.repository_factory_auto import RepositoryFactory
 from app.db.get_repo_factory import get_repository_factory
 from app.models.user import User
@@ -19,7 +21,7 @@ class UserService:
     async def get_by_id(self, user_id: UUID) -> User:
         user = await self.user_repo.get_by_id(user_id)
         if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise UserNotFoundException(code=ResponseCodeEnum.USER_NOT_FOUND.code, detail="User not found")
         return user
 
     async def get_by_username(self, username: str) -> User:
