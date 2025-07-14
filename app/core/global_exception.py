@@ -2,6 +2,9 @@
 
 from typing import Optional
 
+from app.core.response_codes import ResponseCodeEnum
+
+
 class BaseBusinessException(Exception):
     code: int = 50000
     message: str = "业务异常"
@@ -18,6 +21,11 @@ class UserNotFoundException(BaseBusinessException):
     code = 40404
     message = "用户不存在"
     status_code = 404
+
+class UserAlreadyExistsException(BaseBusinessException):
+    code = ResponseCodeEnum.USER_ALREADY_EXISTS
+    message = "用户已存在"
+    status_code = 200
 
 class UserLockedOut(BaseBusinessException):
     code = 40301

@@ -9,7 +9,7 @@ from app.db.session import get_session
 from app.db.repository_factory_auto import RepositoryFactory
 from app.enums.auth_method import AuthMethod
 from app.services.auth_service import AuthService
-from app.schemas.user_schemas import UserCreate, CredentialsRequest
+from app.schemas.user_schemas import UserCreate, CredentialsRequest, UserRead
 from app.schemas.auth_schemas import (
     AuthTokenResponse,
     ChangePasswordRequest,
@@ -32,8 +32,8 @@ router = APIRouter()
 # === Register ===
 @router.post(
     "/register",
-    response_model=StandardResponse[UUID],
-    status_code=status.HTTP_201_CREATED,
+    response_model=StandardResponse[UserRead],
+    status_code=status.HTTP_200_OK,
 )
 async def register_user(
     user_data: UserCreate,
@@ -42,17 +42,14 @@ async def register_user(
     try:
         user = await service.register_user(user_data)
         return response_success(
-            data=user.id,
-            code=ResponseCodeEnum.CREATED,
+            data=UserRead.model_validate(user),
             message="用户注册成功",
-            http_status=status.HTTP_201_CREATED,
         )
     except Exception as e:
         logger.warning(f"用户注册失败: {str(e)}")
         return response_error(
             code=ResponseCodeEnum.USER_ALREADY_EXISTS,
-            message=str(e),
-            http_status=status.HTTP_400_BAD_REQUEST,
+            message=str(e)
         )
 
 

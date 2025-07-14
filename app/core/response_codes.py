@@ -5,7 +5,7 @@ class ResponseCodeEnum(Enum):
 
     CREATED = (201, "created")
     INTERNAL_ERROR = (500, "服务器内部错误")
-    SUCCESS = (20000, "请求成功")
+    SUCCESS = (0, "请求成功")
     VALIDATION_ERROR = (40001, "参数验证失败")
     AUTH_ERROR = (40100, "认证失败")
     FORBIDDEN = (40300, "没有权限")
