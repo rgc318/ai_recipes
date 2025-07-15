@@ -75,7 +75,7 @@ async def login_user(
 
         # 3. 将 refresh_token 安全地设置到 HttpOnly cookie 中
         refresh_cookie_params = get_refresh_cookie_params(refresh_token)
-        logger.info(f"refresh_token: {refresh_token}")
+        # logger.info(f"refresh_token: {refresh_token}")
         # 4. 在响应体中返回 access_token
         return response_success(
             data=AuthTokenResponse(
@@ -179,7 +179,7 @@ async def logout(
 
 @router.post(
     "/refresh-token",
-    response_model=StandardResponse[AuthTokenBundleResponse],
+    response_model=StandardResponse[AuthTokenResponse],
     status_code=status.HTTP_200_OK,
 )
 async def refresh_token_method(
@@ -205,7 +205,7 @@ async def refresh_token_method(
         return response_success(
             data=AuthTokenResponse(
                 access_token=new_token_data["access_token"],
-                expires_at=new_token_data["expires_at"],
+                expires_at=new_token_data["access_expires_at"],
             ),
             message="Token 刷新成功",
             set_cookies=[new_refresh_cookie],
