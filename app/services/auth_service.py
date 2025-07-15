@@ -153,5 +153,7 @@ class AuthService:
         return {
             "access_token": new_access_token,
             "refresh_token": new_refresh_token,
-            "expires_at": datetime.now() + access_exp,
+            "token_type": "bearer",
+            "access_expires_at": datetime.now() + access_exp,
+            "refresh_expires_at": datetime.now() + refresh_exp,
         }
