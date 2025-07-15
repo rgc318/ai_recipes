@@ -5,7 +5,7 @@ from app.core.security.middleware import AuditMiddleware
 from app.db.session import create_db_and_tables
 from contextlib import asynccontextmanager
 from app.core.logger import logger
-from app.core.exceptions.base_exception import BaseBusinessException
+from app.core.exceptions import BaseBusinessException, UnauthorizedException
 from app.core.response_codes import ResponseCodeEnum
 from app.config.settings import settings
 from app.utils.redis_client import RedisClient
@@ -59,7 +59,19 @@ async def business_exception_handler(request: Request, exc: BaseBusinessExceptio
             "data": None
         }
     )
-
+# 使用 @app.exception_handler 装饰器来捕获所有 AuthException 及其子类
+@app.exception_handler(UnauthorizedException)
+async def auth_exception_handler(request: Request, exc: UnauthorizedException):
+    # 当任何地方抛出 TokenExpiredException, InvalidTokenException 等异常时，
+    # 这个函数会被触发，并统一返回 401 状态码。
+    return JSONResponse(
+        status_code=401,
+        content={
+            "code": exc.code,      # 使用自定义异常中具体的业务码
+            "message": exc.message,  # 使用自定义异常中具体的消息
+            "data": None
+        },
+    )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

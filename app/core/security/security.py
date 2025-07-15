@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.services import get_user_service
+from app.core.exceptions import InvalidTokenException
 from app.schemas.user_context import UserContext
 from app.utils.jwt_utils import decode_token, validate_token_type
 from app.models.user import User
@@ -21,14 +22,14 @@ async def get_current_user(
     payload = await decode_token(token)
     user_id: str = payload.get("sub")
     if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise InvalidTokenException(message="Token payload is missing user identifier (sub)")
     validate_token_type(payload, expected="access")
     user_id: str = payload.get("sub")
 
     user = await user_service.get_by_id_with_roles_permissions(UUID(user_id))
 
     if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+        raise InvalidTokenException(message="User not found or is inactive")
     return UserContext(
         id=user.id,
         username=user.username,

@@ -11,7 +11,7 @@ def get_repository_factory(
     session: AsyncSession = Depends(get_session),
     context: dict = Depends(get_request_scope),
 ) -> RepositoryFactory:
-    logger.info(context)
+    # logger.info(context)
     return RepositoryFactory(
         db=session,
         user_id=context.get("user_id"),
