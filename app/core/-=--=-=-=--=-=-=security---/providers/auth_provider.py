@@ -52,7 +52,7 @@ class AuthProvider[T](metaclass=abc.ABCMeta):
         )
 
     def try_get_user(self, username: str) -> PrivateUser | None:
-        """Try to get a management from the database, first trying username, then trying email"""
+        """Try to get a user from the database, first trying username, then trying email"""
         if self.__has_tried_user:
             return self.user
 
@@ -67,5 +67,5 @@ class AuthProvider[T](metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def authenticate(self) -> tuple[str, timedelta] | None:
-        """Attempt to authenticate a management"""
+        """Attempt to authenticate a user"""
         raise NotImplementedError

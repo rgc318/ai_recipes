@@ -24,7 +24,7 @@ async def get_user_info(
     current_user: UserRead = Depends(get_current_user),
     service: UserService = Depends(get_user_service),
 ):
-    user = await service.get_by_id(current_user.id)
+    user = await service.get_user_by_id(current_user.id)
     if not user:
         return response_error(
             code=ResponseCodeEnum.USER_NOT_FOUND,
@@ -59,7 +59,7 @@ async def create_user(user_data: UserCreate, service: UserService = Depends(get_
     response_model=StandardResponse[UserRead]
 )
 async def read_user(user_id: UUID, service: UserService = Depends(get_user_service)):
-    user = await service.get_by_id(user_id)
+    user = await service.get_user_by_id(user_id)
     if not user:
         return response_error(
             code=ResponseCodeEnum.USER_NOT_FOUND,

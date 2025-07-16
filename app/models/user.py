@@ -10,7 +10,7 @@ from app.schemas.user_schemas import UserRead
 
 
 class UserRole(BaseModel, table=True):
-    user_id: UUID = Field(foreign_key="management.id", primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
     role_id: UUID = Field(foreign_key="role.id", primary_key=True)
 
 class RolePermission(BaseModel, table=True):
@@ -30,7 +30,7 @@ class Permission(BaseModel, table=True):
 
     roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)
 class User(BaseModel, table=True):
-    __tablename__ = "management"
+    __tablename__ = "user"
     __pydantic_model__ = UserRead
 
     username: str = Field(index=True, nullable=False, unique=True)
@@ -51,7 +51,7 @@ class User(BaseModel, table=True):
     last_login_at: Optional[datetime] = None
     login_count: int = Field(default=0)
 
-    roles: List["Role"] = Relationship(back_populates="management", link_model=UserRole)
+    roles: List["Role"] = Relationship(back_populates="users", link_model=UserRole)
 
     @property
     def permissions(self) -> Set[str]:
@@ -63,34 +63,34 @@ class User(BaseModel, table=True):
 
 class UserAuth(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="management.id")
+    user_id: UUID = Field(foreign_key="user.id")
     provider: str  # "github" / "wechat" / "apple" / "local"
     provider_user_id: str
     access_token: Optional[str] = None
     refresh_token: Optional[str] = None
 
 class UserSavedRecipe(BaseModel, table=True):
-    user_id: UUID = Field(foreign_key="management.id", primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
     recipe_id: UUID = Field(foreign_key="recipe.id", primary_key=True)
     saved_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserAIHistory(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="management.id")
+    user_id: UUID = Field(foreign_key="user.id")
     query: str
     ai_response: str
     # created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserFeedback(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="management.id")
+    user_id: UUID = Field(foreign_key="user.id")
     content: str
     contact_email: Optional[str] = None
     # created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserLoginLog(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="management.id")
+    user_id: UUID = Field(foreign_key="user.id")
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     login_at: datetime = Field(default_factory=datetime.utcnow)
@@ -101,7 +101,7 @@ class UserLoginLog(BaseModel, table=True):
 
 
 class UserPreference(BaseModel, table=True):
-    user_id: UUID = Field(foreign_key="management.id", primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
     preferred_language: Optional[str] = Field(default="zh")
     ai_style: Optional[str] = Field(default="healthy")
     subscribe_newsletter: bool = Field(default=False)
@@ -109,7 +109,7 @@ class UserPreference(BaseModel, table=True):
 
 class UserLoginFailLog(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: Optional[UUID] = Field(default=None, foreign_key="management.id")
+    user_id: Optional[UUID] = Field(default=None, foreign_key="user.id")
     username_attempted: str
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -129,7 +129,7 @@ class VerificationCode(BaseModel, table=True):
 
 class UserActionLog(BaseModel, table=True):
     # id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="management.id")
+    user_id: UUID = Field(foreign_key="user.id")
     action: str  # e.g., "create_recipe", "delete_account"
     target_id: Optional[UUID] = None
     target_type: Optional[str] = None  # e.g., "Recipe", "Comment"
