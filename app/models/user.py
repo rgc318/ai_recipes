@@ -18,17 +18,25 @@ class RolePermission(BaseModel, table=True):
     permission_id: UUID = Field(foreign_key="permission.id", primary_key=True)
 
 class Role(BaseModel, table=True):
-    name: str
+    # 【新增】code 字段，作为系统内部唯一、不可变的标识符
+    code: str = Field(..., unique=True, index=True, description="角色的唯一代码，系统内部使用，不可变")
+    # name 字段现在作为可随时修改的、对用户友好的显示名称
+    name: str = Field(..., description="角色的显示名称，人类可读，可修改")
     description: Optional[str] = None
 
     users: List["User"] = Relationship(back_populates="roles", link_model=UserRole)
     permissions: List["Permission"] = Relationship(back_populates="roles", link_model=RolePermission)
 
+
 class Permission(BaseModel, table=True):
-    name: str
+    # 【新增】code 字段，作为系统内部唯一、不可变的标识符
+    code: str = Field(..., unique=True, index=True, description="权限的唯一代码，如 'recipe:create'")
+    # name 字段现在作为可随时修改的、对用户友好的显示名称
+    name: str = Field(..., description="权限的显示名称，如 '创建菜谱'")
     description: Optional[str] = None
 
     roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)
+
 class User(BaseModel, table=True):
     __tablename__ = "user"
     __pydantic_model__ = UserRead
@@ -58,7 +66,7 @@ class User(BaseModel, table=True):
         perms = set()
         for role in self.roles:
             for perm in role.permissions:
-                perms.add(perm.name)
+                perms.add(perm.code)
         return perms
 
 class UserAuth(BaseModel, table=True):

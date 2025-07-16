@@ -30,13 +30,10 @@ async def get_current_user(
 
     if not user or not user.is_active:
         raise InvalidTokenException(message="User not found or is inactive")
-    return UserContext(
-        id=user.id,
-        username=user.username,
-        is_superuser=user.is_superuser,
-        roles=[role.name for role in user.roles],
-        permissions=[perm.name for perm in user.permissions],
-    )
+
+    user_context = UserContext.model_validate(user)
+
+    return user_context
 
 async def get_current_active_user(
     # 这个依赖现在返回的是 UserContext，为了类型提示更准确，可以进行相应调整
