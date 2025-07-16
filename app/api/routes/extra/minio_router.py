@@ -30,10 +30,10 @@ async def upload_avatar(
         result = await minio_service.upload_user_avatar(file, user_id)
         return response_success(data=result, message="Avatar uploaded successfully")
     except HTTPException as e:
-        logger.error(f"Failed to upload avatar for user {user_id}: {e.detail}")
+        logger.error(f"Failed to upload avatar for management {user_id}: {e.detail}")
         return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
     except Exception as e:
-        logger.error(f"Unexpected error during avatar upload for user {user_id}: {str(e)}")
+        logger.error(f"Unexpected error during avatar upload for management {user_id}: {str(e)}")
         return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during avatar upload")
 
 
@@ -74,7 +74,7 @@ async def upload_general(
 # 删除文件
 @router.delete("/delete")
 async def delete_file(
-    key: str = Query(..., description="文件 key 路径，如 user-avatars/xxx.png"),
+    key: str = Query(..., description="文件 key 路径，如 management-avatars/xxx.png"),
 ):
     try:
         await minio_service.delete_file(key)
@@ -103,7 +103,7 @@ async def file_exists(
 # 列出文件
 @router.get("/list")
 async def list_files(
-    prefix: str = Query("", description="前缀过滤，如 user-avatars/"),
+    prefix: str = Query("", description="前缀过滤，如 management-avatars/"),
 ):
     try:
         files = await minio_service.list_files(prefix)

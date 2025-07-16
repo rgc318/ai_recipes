@@ -14,7 +14,7 @@ from app.schema.user.user import PrivateUser
 
 
 class LDAPProvider(CredentialsProvider):
-    """Authentication provider that authenticats a user against an LDAP server using username/password combination"""
+    """Authentication provider that authenticats a management against an LDAP server using username/password combination"""
 
     _logger = root_logger.get_logger("ldap_provider")
 
@@ -23,10 +23,10 @@ class LDAPProvider(CredentialsProvider):
         self.conn = None
 
     def authenticate(self) -> tuple[str, timedelta] | None:
-        """Attempt to authenticate a user given a username and password against an LDAP provider"""
+        """Attempt to authenticate a management given a username and password against an LDAP provider"""
         # When LDAP is enabled, we need to still also support authentication with app backend
-        # First we look to see if we have a user. If we don't we'll attempt to create one with LDAP
-        # If we do find a user, we will check if their auth method is LDAP and attempt to authenticate
+        # First we look to see if we have a management. If we don't we'll attempt to create one with LDAP
+        # If we do find a management, we will check if their auth method is LDAP and attempt to authenticate
         # Otherwise, we will proceed with app authentication
         user = self.try_get_user(self.data.username)
         if not user or user.auth_method == AuthMethod.LDAP:
@@ -38,8 +38,8 @@ class LDAPProvider(CredentialsProvider):
 
     def search_user(self, conn: LDAPObject) -> list[tuple[str, dict[str, list[bytes]]]] | None:
         """
-        Searches for a user by LDAP_ID_ATTRIBUTE, LDAP_MAIL_ATTRIBUTE, and the provided LDAP_USER_FILTER.
-        If none or multiple users are found, return False
+        Searches for a management by LDAP_ID_ATTRIBUTE, LDAP_MAIL_ATTRIBUTE, and the provided LDAP_USER_FILTER.
+        If none or multiple management are found, return False
         """
         if not self.data:
             return None
@@ -47,7 +47,7 @@ class LDAPProvider(CredentialsProvider):
 
         user_filter = ""
         if settings.LDAP_USER_FILTER:
-            # fill in the template provided by the user to maintain backwards compatibility
+            # fill in the template provided by the management to maintain backwards compatibility
             user_filter = settings.LDAP_USER_FILTER.format(
                 id_attribute=settings.LDAP_ID_ATTRIBUTE,
                 mail_attribute=settings.LDAP_MAIL_ATTRIBUTE,
@@ -75,18 +75,18 @@ class LDAPProvider(CredentialsProvider):
                 ],
             )
         except ldap.FILTER_ERROR:
-            self._logger.error("[LDAP] Bad user search filter")
+            self._logger.error("[LDAP] Bad management search filter")
 
         if not user_entry:
             conn.unbind_s()
-            self._logger.error("[LDAP] No user was found with the provided user filter")
+            self._logger.error("[LDAP] No management was found with the provided management filter")
             return None
 
         # we only want the entries that have a dn
         user_entry = [(dn, attr) for dn, attr in user_entry if dn]
 
         if len(user_entry) > 1:
-            self._logger.warning("[LDAP] Multiple users found with the provided user filter")
+            self._logger.warning("[LDAP] Multiple management found with the provided management filter")
             self._logger.debug(f"[LDAP] The following entries were returned: {user_entry}")
             conn.unbind_s()
             return None
@@ -97,7 +97,7 @@ class LDAPProvider(CredentialsProvider):
         """Given a username and password, tries to authenticate by BINDing to an
         LDAP server
 
-        If the BIND succeeds, it will either create a new user of that username on
+        If the BIND succeeds, it will either create a new management of that username on
         the server or return an existing one.
         Returns False on failure.
         """
@@ -125,7 +125,7 @@ class LDAPProvider(CredentialsProvider):
         try:
             conn.simple_bind_s(settings.LDAP_QUERY_BIND, settings.LDAP_QUERY_PASSWORD)
         except (ldap.INVALID_CREDENTIALS, ldap.NO_SUCH_OBJECT):
-            self._logger.error("[LDAP] Unable to bind to with provided user/password")
+            self._logger.error("[LDAP] Unable to bind to with provided management/password")
             conn.unbind_s()
             return None
 
@@ -134,7 +134,7 @@ class LDAPProvider(CredentialsProvider):
             return None
         user_dn, user_attr = user_entry[0]
 
-        # Check the credentials of the user
+        # Check the credentials of the management
         try:
             self._logger.debug(f"[LDAP] Attempting to bind with '{user_dn}' using the provided password")
             conn.simple_bind_s(user_dn, data.password)
@@ -157,7 +157,7 @@ class LDAPProvider(CredentialsProvider):
             for attribute_key, attribute_name in attribute_keys.items():
                 if attribute_key not in user_attr or len(user_attr[attribute_key]) == 0:
                     self._logger.error(
-                        f"[LDAP] Unable to create user due to missing '{attribute_name}' ('{attribute_key}') attribute"
+                        f"[LDAP] Unable to create management due to missing '{attribute_name}' ('{attribute_key}') attribute"
                     )
                     self._logger.debug(f"[LDAP] User has the following attributes: {user_attr}")
                     conn.unbind_s()
@@ -178,7 +178,7 @@ class LDAPProvider(CredentialsProvider):
         if settings.LDAP_ADMIN_FILTER:
             should_be_admin = len(conn.search_s(user_dn, ldap.SCOPE_BASE, settings.LDAP_ADMIN_FILTER, [])) > 0
             if user.admin != should_be_admin:
-                self._logger.debug(f"[LDAP] {'Setting' if should_be_admin else 'Removing'} user as admin")
+                self._logger.debug(f"[LDAP] {'Setting' if should_be_admin else 'Removing'} management as admin")
                 user.admin = should_be_admin
                 db.users.update(user.id, user)
 

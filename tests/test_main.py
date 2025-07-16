@@ -19,7 +19,7 @@ def test_minio_connection():
 def test_upload_avatar():
     mock_minio_service.upload_user_avatar.return_value = {
         "url": "http://mocked-url/avatar.jpg",
-        "key": "user-avatars/user123/avatar.jpg",
+        "key": "management-avatars/user123/avatar.jpg",
         "content_type": "image/jpeg",
     }
 
@@ -82,7 +82,7 @@ def test_upload_general_file():
 def test_file_exists():
     mock_minio_service.file_exists.return_value = True
 
-    response = client.get("/exists", params={"key": "user-avatars/user123/avatar.jpg"})
+    response = client.get("/exists", params={"key": "management-avatars/user123/avatar.jpg"})
     assert response.status_code == 200
     assert response.json()["data"]["exists"] is True
 
@@ -91,16 +91,16 @@ def test_file_exists():
 def test_delete_file():
     mock_minio_service.delete_file.return_value = None
 
-    response = client.delete("/delete", params={"key": "user-avatars/user123/avatar.jpg"})
+    response = client.delete("/delete", params={"key": "management-avatars/user123/avatar.jpg"})
     assert response.status_code == 200
-    assert response.json()["message"] == "File user-avatars/user123/avatar.jpg deleted successfully"
+    assert response.json()["message"] == "File management-avatars/user123/avatar.jpg deleted successfully"
 
 # 测试列出文件
 @patch("app.services.minio_service.list_files", mock_minio_service.list_files)
 def test_list_files():
     mock_minio_service.list_files.return_value = ["file1.jpg", "file2.jpg"]
 
-    response = client.get("/list", params={"prefix": "user-avatars/"})
+    response = client.get("/list", params={"prefix": "management-avatars/"})
     assert response.status_code == 200
     assert "files" in response.json()["data"]
     assert len(response.json()["data"]["files"]) == 2
@@ -112,7 +112,7 @@ def test_generate_download_url():
 
     response = client.get(
         "/generate-download-url",
-        params={"key": "user-avatars/user123/avatar.jpg", "expires_in": 3600},
+        params={"key": "management-avatars/user123/avatar.jpg", "expires_in": 3600},
     )
     assert response.status_code == 200
     assert "download_url" in response.json()["data"]
@@ -125,7 +125,7 @@ def test_generate_upload_url():
 
     response = client.get(
         "/generate-upload-url",
-        params={"key": "user-avatars/user123/avatar.jpg", "expires_in": 3600},
+        params={"key": "management-avatars/user123/avatar.jpg", "expires_in": 3600},
     )
     assert response.status_code == 200
     assert "upload_url" in response.json()["data"]

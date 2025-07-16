@@ -14,7 +14,7 @@ from app.services.user_services.user_service import UserService
 
 
 class CredentialsProvider(AuthProvider[CredentialsRequest]):
-    """Authentication provider that authenticates a user the database using username/password combination"""
+    """Authentication provider that authenticates a management the database using username/password combination"""
 
     _logger = root_logger.get_logger("credentials_provider")
 
@@ -22,7 +22,7 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
         super().__init__(session, data)
 
     def authenticate(self) -> tuple[str, timedelta] | None:
-        """Attempt to authenticate a user given a username and password"""
+        """Attempt to authenticate a management given a username and password"""
         settings = get_app_settings()
         db = get_repositories(self.session, group_id=None, household_id=None)
         user = self.try_get_user(self.data.username)
@@ -34,7 +34,7 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
         if user.auth_method != AuthMethod.app:
             self.verify_fake_password()
             self._logger.warning(
-                "Found user but their auth method is not 'app'. Unable to continue with credentials login"
+                "Found management but their auth method is not 'app'. Unable to continue with credentials login"
             )
             return None
 
@@ -56,7 +56,7 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
         return self.get_access_token(user, self.data.remember_me)  # type: ignore
 
     def verify_fake_password(self):
-        # To prevent user enumeration we perform the verify_password computation to ensure
+        # To prevent management enumeration we perform the verify_password computation to ensure
         # server side time is relatively constant and not vulnerable to timing attacks.
         CredentialsProvider.verify_password(
             "abc123cba321",

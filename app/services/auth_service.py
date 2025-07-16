@@ -11,9 +11,11 @@ from app.db.crud.user_repo import UserRepository
 from app.models import User
 from app.schemas.user_schemas import UserCreate
 from app.core.security.password_utils import get_password_hash, verify_password
+from app.services._base_service import BaseService
 from app.utils.jwt_utils import decode_token, revoke_token, create_refresh_token
 from app.enums.auth_method import AuthMethod
-from app.core.exceptions import UserLockedOutException, UserAlreadyExistsException
+from app.core.exceptions import UserLockedOutException, UserAlreadyExistsException, AlreadyExistsException, \
+    UnauthorizedException, NotFoundException, InvalidTokenException, TokenExpiredException, TokenRevokedException
 from app.core.security.providers import AuthProvider, CredentialsProvider
 from app.utils.jwt_utils import (
     decode_token,
@@ -29,8 +31,9 @@ AUTH_PROVIDER_REGISTRY: dict[AuthMethod, Type[AuthProvider]] = {
     # AuthMethod.github: GitHubProvider,
 }
 
-class AuthService:
+class AuthService(BaseService):
     def __init__(self, repo_factory: RepositoryFactory):
+        super().__init__()  # 【修改3】调用父类的构造函数，注入 settings 和 logger
         self.factory = repo_factory
         self.user_repo: UserRepository = repo_factory.user
 
@@ -39,7 +42,7 @@ class AuthService:
             raise UserAlreadyExistsException()
 
         if user_in.email and await self.user_repo.get_by_email(user_in.email):
-            raise HTTPException(status_code=400, detail="Email already exists")
+            raise AlreadyExistsException("邮箱已被注册")
 
         hashed_password = get_password_hash(user_in.password)
         user_data = user_in.model_dump(exclude={"password"})
@@ -56,18 +59,18 @@ class AuthService:
         """
         provider_cls = AUTH_PROVIDER_REGISTRY.get(method)
         if not provider_cls:
-            raise HTTPException(status_code=400, detail=f"Unsupported auth method: {method}")
+            raise UnauthorizedException(f"不支持的认证方式: {method}")
 
         provider = provider_cls(repo_factory=self.factory, data=data)  # ✅ 传入 repo_factory
         access_token, access_expires = await provider.authenticate()
         if not access_token:
-            raise HTTPException(status_code=401, detail="Invalid username or password")
+            raise UnauthorizedException("用户名或密码错误")
 
         # 获取 user_id（由 provider 决定返回什么）
         user = await provider.get_user()
 
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise UnauthorizedException("认证成功后无法获取用户信息")
 
 
         user_id = str(user.id)
@@ -87,10 +90,10 @@ class AuthService:
     async def change_password(self, user_id: UUID, old_password: str, new_password: str) -> bool:
         user = await self.user_repo.get_by_id(user_id)
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise NotFoundException("用户不存在")
 
         if not verify_password(old_password, user.password):
-            raise HTTPException(status_code=401, detail="Incorrect old password")
+            raise UnauthorizedException("旧密码不正确")
 
         hashed_password = get_password_hash(new_password)
         await self.user_repo.update(user.id, {"password": hashed_password})
@@ -99,9 +102,9 @@ class AuthService:
     async def reset_password(self, email: str, new_password: str) -> bool:
         user = await self.user_repo.get_by_email(email)
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise NotFoundException("用户不存在")
         if not user.is_active:
-            raise HTTPException(status_code=400, detail="User is inactive")
+            raise UnauthorizedException("用户账户已被禁用")
         hashed_password = get_password_hash(new_password)
         await self.user_repo.update(user.id, {"hashed_password": hashed_password})
         return True
@@ -115,12 +118,17 @@ class AuthService:
             jti = payload.get("jti")
             exp = payload.get("exp")
             if not jti or not exp:
-                raise HTTPException(status_code=400, detail="Invalid token payload")
+                raise InvalidTokenException("无效的令牌载荷")
             expires_in = int(exp - datetime.now().timestamp())
             await revoke_token(jti, expires_in=expires_in)
             return True
+        except (InvalidTokenException, TokenExpiredException, TokenRevokedException) as e:
+            # 如果令牌本身就无效或已过期，登出操作也视为“成功”
+            self.logger.warning(f"尝试登出一个无效或已过期的令牌: {e}")
+            return True
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Logout failed: {str(e)}")
+            self.logger.error(f"登出时发生未知错误: {e}", exc_info=True)
+            raise
 
     async def refresh_token(self, token: str) -> dict:
         """

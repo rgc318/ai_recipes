@@ -23,7 +23,7 @@
 # from app.repos.all_repositories import AllRepositories, get_repositories
 # from app.routes._base.checks import OperationChecks
 # from app.schema.household.household import HouseholdInDB
-# from app.schema.user.user import GroupInDB, PrivateUser
+# from app.schema.management.management import GroupInDB, PrivateUser
 # from app.services.event_bus_service.event_bus_service import EventBusService
 # from app.services.event_bus_service.event_types import EventDocumentDataBase, EventTypes
 #
@@ -134,7 +134,7 @@
 #     by all Admin controllers.
 #     """
 #
-#     user: PrivateUser = Depends(get_current_user)
+#     management: PrivateUser = Depends(get_current_user)
 #     integration_id: str = Depends(get_integration_id)
 #     translator: Translator = Depends(local_provider)
 #
@@ -149,11 +149,11 @@
 #
 #     @property
 #     def group_id(self) -> UUID4:
-#         return self.user.group_id
+#         return self.management.group_id
 #
 #     @property
 #     def household_id(self) -> UUID4:
-#         return self.user.household_id
+#         return self.management.household_id
 #
 #     @property
 #     def group(self) -> GroupInDB:
@@ -166,7 +166,7 @@
 #     @property
 #     def checks(self) -> OperationChecks:
 #         if not self._checks:
-#             self._checks = OperationChecks(self.user)
+#             self._checks = OperationChecks(self.management)
 #         return self._checks
 #
 #
@@ -177,7 +177,7 @@
 #     by all Admin controllers.
 #     """
 #
-#     user: PrivateUser = Depends(get_admin_user)
+#     management: PrivateUser = Depends(get_admin_user)
 #
 #     @property
 #     def repos(self):

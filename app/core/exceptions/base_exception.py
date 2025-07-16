@@ -30,3 +30,20 @@ class BaseBusinessException(Exception):
             "status_code": self.status_code,
             "extra": self.extra,
         }
+
+
+class NotFoundException(BaseBusinessException):
+    """
+    当请求的资源在数据库中不存在时抛出。
+    """
+    def __init__(self, message: str = "资源不存在"):
+        # 我们使用刚刚在 ResponseCodeEnum 中定义的 NOT_FOUND
+        super().__init__(ResponseCodeEnum.NOT_FOUND, message=message)
+
+
+class AlreadyExistsException(BaseBusinessException):
+    """
+    当尝试创建一个已存在的资源时抛出（例如，用户名或角色名重复）。
+    """
+    def __init__(self, message: str = "资源已存在"):
+        super().__init__(ResponseCodeEnum.ALREADY_EXISTS, message=message)

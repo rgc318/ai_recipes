@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 from uuid import UUID
 from datetime import datetime
 
@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_valida
 from pydantic_core.core_schema import ValidationInfo
 
 from app.enums.auth_method import AuthMethod
+from app.schemas.role_schemas import RoleRead
 
 # ==========================
 # 💡 通用类型定义
@@ -59,7 +60,12 @@ class UserUpdate(BaseModel):
     avatar_url: Optional[str] = Field(None, description="头像 URL")
     password: Optional[PasswordStr] = Field(None, description="新密码，至少 8 位")
 
-
+class UserReadWithRoles(UserRead):
+    """
+    一个更详细的用户读取模型，继承自 UserRead，并额外包含了用户的角色列表。
+    主要用于后台管理的用户列表展示。
+    """
+    roles: List[RoleRead] = []
 # ==========================
 # 🔐 用户修改密码模型
 # ==========================

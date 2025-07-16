@@ -12,7 +12,7 @@ from app.repos.all_repositories import get_repositories
 
 
 class OpenIDProvider(AuthProvider[UserInfo]):
-    """Authentication provider that authenticates a user using a token from OIDC ID token"""
+    """Authentication provider that authenticates a management using a token from OIDC ID token"""
 
     _logger = root_logger.get_logger("openid_provider")
 
@@ -20,7 +20,7 @@ class OpenIDProvider(AuthProvider[UserInfo]):
         super().__init__(session, data)
 
     def authenticate(self) -> tuple[str, timedelta] | None:
-        """Attempt to authenticate a user given a username and password"""
+        """Attempt to authenticate a management given a username and password"""
 
         settings = get_app_settings()
         claims = self.data
@@ -57,7 +57,7 @@ class OpenIDProvider(AuthProvider[UserInfo]):
 
             if not (is_valid_user or is_admin):
                 self._logger.warning(
-                    "[OIDC] Successfully authenticated, but user does not have one of the required group(s). \
+                    "[OIDC] Successfully authenticated, but management does not have one of the required group(s). \
                     Found: %s - Required (one of): %s",
                     group_claim,
                     [settings.OIDC_USER_GROUP, settings.OIDC_ADMIN_GROUP],
@@ -67,14 +67,14 @@ class OpenIDProvider(AuthProvider[UserInfo]):
         user = self.try_get_user(claims.get(settings.OIDC_USER_CLAIM))
         if not user:
             if not settings.OIDC_SIGNUP_ENABLED:
-                self._logger.debug("[OIDC] No user found. Not creating a new user - new user creation is disabled.")
+                self._logger.debug("[OIDC] No management found. Not creating a new management - new management creation is disabled.")
                 return None
 
-            self._logger.debug("[OIDC] No user found. Creating new OIDC user.")
+            self._logger.debug("[OIDC] No management found. Creating new OIDC management.")
 
             try:
                 # some IdPs don't provide a username (looking at you Google), so if we don't have the claim,
-                # we'll create the user with whatever the USER_CLAIM is (default email)
+                # we'll create the management with whatever the USER_CLAIM is (default email)
                 username = claims.get(
                     "preferred_username", claims.get("username", claims.get(settings.OIDC_USER_CLAIM))
                 )
@@ -91,19 +91,19 @@ class OpenIDProvider(AuthProvider[UserInfo]):
                 self.session.commit()
 
             except Exception as e:
-                self._logger.error("[OIDC] Exception while creating user: %s", e)
+                self._logger.error("[OIDC] Exception while creating management: %s", e)
                 return None
 
             return self.get_access_token(user, settings.OIDC_REMEMBER_ME)  # type: ignore
 
         if user:
             if settings.OIDC_ADMIN_GROUP and user.admin != is_admin:
-                self._logger.debug("[OIDC] %s user as admin", "Setting" if is_admin else "Removing")
+                self._logger.debug("[OIDC] %s management as admin", "Setting" if is_admin else "Removing")
                 user.admin = is_admin
                 repos.users.update(user.id, user)
             return self.get_access_token(user, settings.OIDC_REMEMBER_ME)
 
-        self._logger.warning("[OIDC] Found user but their AuthMethod does not match OIDC")
+        self._logger.warning("[OIDC] Found management but their AuthMethod does not match OIDC")
         return None
 
     @property

@@ -88,6 +88,23 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         stmt = self._base_stmt().where(self.model.id == id)
         return await self._run_and_scalar(stmt, "get_by_id")
 
+    async def get_by_ids(self, ids: List[UUID]) -> List[ModelType]:
+        """
+        根据一个ID列表，批量获取对象。
+        这是一个非常高效的查询，可以避免在循环中进行多次数据库调用。
+
+        Args:
+            ids: 一个包含UUID的列表。
+
+        Returns:
+            找到的对象列表。
+        """
+        if not ids:
+            return []
+
+        stmt = self._base_stmt().where(self.model.id.in_(ids))
+        return await self._run_and_scalars(stmt, "get_by_ids")
+
     async def list(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
         stmt = self._base_stmt().offset(skip).limit(limit)
         return await self._run_and_scalars(stmt, "list")
