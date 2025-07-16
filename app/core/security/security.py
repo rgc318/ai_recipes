@@ -22,11 +22,11 @@ async def get_current_user(
     payload = await decode_token(token)
     user_id: str = payload.get("sub")
     if not user_id:
-        raise InvalidTokenException(message="Token payload is missing management identifier (sub)")
+        raise InvalidTokenException(message="Token payload is missing user identifier (sub)")
     validate_token_type(payload, expected="access")
     user_id: str = payload.get("sub")
 
-    user = await user_service.get_by_id_with_roles_permissions(UUID(user_id))
+    user = await user_service.get_user_with_roles(UUID(user_id))
 
     if not user or not user.is_active:
         raise InvalidTokenException(message="User not found or is inactive")
@@ -39,8 +39,13 @@ async def get_current_user(
     )
 
 async def get_current_active_user(
-    user: User = Depends(get_current_user),
-) -> User:
-    if not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive management")
-    return user
+    # 这个依赖现在返回的是 UserContext，为了类型提示更准确，可以进行相应调整
+    # 但为了保持简单，我们暂时让它接收 UserContext
+    user_context: UserContext = Depends(get_current_user),
+) -> UserContext:
+    """
+    一个简单的依赖，确保在 get_current_user 的基础上，用户是激活状态。
+    （实际上 get_current_user 内部已经检查了 is_active，所以这个依赖主要是为了语义清晰）
+    """
+    # get_current_user 内部已经检查了 is_active，所以这里无需重复检查
+    return user_context

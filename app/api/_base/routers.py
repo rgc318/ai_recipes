@@ -18,7 +18,7 @@
 #
 #
 # class UserAPIRouter(APIRouter):
-#     """Router for functions to be protected behind management authentication"""
+#     """Router for functions to be protected behind user authentication"""
 #
 #     def __init__(self, tags: list[str | Enum] | None = None, prefix: str = "", **kwargs):
 #         super().__init__(tags=tags, prefix=prefix, dependencies=[Depends(get_current_user)], **kwargs)

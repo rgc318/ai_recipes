@@ -8,7 +8,7 @@ class PermissionBase(BaseModel):
     """
     权限的基础模型，包含所有权限共有的核心字段。
     """
-    name: str = Field(..., description="权限的唯一名称，例如：'order:create', 'management:read_all'")
+    name: str = Field(..., description="权限的唯一名称，例如：'order:create', 'user:read_all'")
     description: Optional[str] = Field(None, description="权限的详细描述，解释该权限的作用。")
 
 

@@ -16,7 +16,7 @@ minio:
   costume_url: true                                 # 是否使用 自定义url
   cdn_base_url: "http://192.168.31.229:19000"        # 公网 CDN 地址，用于生成文件的访问 URL
 #  cdn_prefix_mapping:
-#    "/management-avatars": "https://cdn.example.com/user-avatars"
+#    "/user-avatars": "https://cdn.example.com/user-avatars"
 #    "/recipe-images": "https://cdn.example.com/recipe-images"
 
 logging:
@@ -29,7 +29,7 @@ security_settings:
   token_expire_minutes: 60  # 例如 60 分钟
   jwt_algorithm: "HS256"
   jwt_issuer: "ai-recipes"
-  jwt_audience: "ai-recipes-management"
+  jwt_audience: "ai-recipes-user"
   secret: "your-super-secret"
   fake_password_hash: "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i"
   testing: false
