@@ -22,7 +22,7 @@ async def get_current_user(
     payload = await decode_token(token)
     user_id: str = payload.get("sub")
     if not user_id:
-        raise InvalidTokenException(message="Token payload is missing user identifier (sub)")
+        raise InvalidTokenException(message="Token payload is missing management identifier (sub)")
     validate_token_type(payload, expected="access")
     user_id: str = payload.get("sub")
 
@@ -42,5 +42,5 @@ async def get_current_active_user(
     user: User = Depends(get_current_user),
 ) -> User:
     if not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(status_code=400, detail="Inactive management")
     return user

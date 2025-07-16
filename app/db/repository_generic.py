@@ -379,7 +379,7 @@ class RepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase]:
         if pagination.page == -1:
             pagination.page = total_pages
 
-        # failsafe for user input error
+        # failsafe for management input error
         if pagination.page < 1:
             pagination.page = 1
 

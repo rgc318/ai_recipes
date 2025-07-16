@@ -11,6 +11,7 @@ class ResponseCodeEnum(Enum):
     AUTH_ERROR = (40100, "认证失败")
     FORBIDDEN = (40300, "没有权限")
     NOT_FOUND = (40400, "资源不存在")
+    ALREADY_EXISTS = (40401, "资源不存在")
     SERVER_ERROR = (50000, "服务器内部错误")
 
     # === 用户相关 ===

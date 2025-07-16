@@ -1,4 +1,4 @@
 from .config_loader import *
-from .base_setting import *
+from app.config.out.base_setting import *
 from .settings import *
 

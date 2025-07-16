@@ -1,6 +1,10 @@
 # app/core/exceptions/__init__.py
 
-from .base_exception import BaseBusinessException
+from .base_exception import (
+    BaseBusinessException,
+    NotFoundException,
+    AlreadyExistsException,
+)
 from .user_exceptions import (
     UserAlreadyExistsException,
     UserNotFoundException,
@@ -26,6 +30,8 @@ from .jwt_exceptions import (
 
 __all__ = [
     "BaseBusinessException",
+    "NotFoundException",
+    "AlreadyExistsException",
 
     "UserAlreadyExistsException",
     "UserNotFoundException",

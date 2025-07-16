@@ -8,10 +8,12 @@ from app.db.get_repo_factory import get_repository_factory
 from app.models.recipe import Recipe
 from app.schemas.recipe_schemas import RecipeCreate, RecipeUpdate
 from app.db.crud.recipe_repo import RecipeRepository
+from app.services._base_service import BaseService
 
 
-class RecipeService:
+class RecipeService(BaseService):
     def __init__(self, factory: RepositoryFactory):
+        super().__init__()
         self.factory = factory
         self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)
 

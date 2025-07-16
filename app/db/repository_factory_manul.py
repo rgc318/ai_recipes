@@ -30,7 +30,7 @@ class RepositoryFactory:
     @cached_property
     def user(self) -> UserRepository:
         repo = UserRepository(self._db, context=self.context)
-        self._registry["user"] = repo
+        self._registry["management"] = repo
         return repo
 
     @cached_property
@@ -51,7 +51,7 @@ class RepositoryFactory:
             raise ValueError(f"Repository '{name}' not found.")
         return repo
 
-    # 👇 允许 factory.user.create() 这样的访问
+    # 👇 允许 factory.management.create() 这样的访问
     def __getattr__(self, item: str) -> Any:
         return self.get_repo(item)
 
