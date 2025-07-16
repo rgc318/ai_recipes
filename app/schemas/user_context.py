@@ -3,10 +3,10 @@ from typing import List
 from uuid import UUID
 from pydantic import BaseModel
 
+from app.schemas.user_schemas import UserRead
 
-class UserContext(BaseModel):
-    id: UUID
-    username: str
+
+class UserContext(UserRead):
     roles: List[str]
     permissions: List[str]
-    is_superuser: bool
+

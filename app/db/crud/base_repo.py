@@ -9,21 +9,18 @@ from sqlalchemy import asc, desc, or_, func
 import logging
 import time
 
+from app.core.types.common import ModelType
 from app.db.repo_registrar import RepositoryRegistrar
 from app.metrics.repo_metrics import repository_sql_duration
+from app.schemas.user_schemas import PageResponse
 
-ModelType = TypeVar("ModelType", bound=SQLModel)
+
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
 UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
 
-class PageResponse(BaseModel, Generic[ModelType]):
-    items: List[ModelType]
-    total: int
-    page: int
-    total_pages: int
-    per_page: int
+
 
 class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], RepositoryRegistrar):
     def __init__(self, db: AsyncSession, model: Type[ModelType], context: dict = None):

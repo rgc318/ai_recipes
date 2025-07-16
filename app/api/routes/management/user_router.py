@@ -1,13 +1,16 @@
 from types import NoneType
+from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security.security import get_current_user
 from app.db.session import get_session
+from app.schemas.user_context import UserContext
 from app.services.user_service import UserService
 from app.api.dependencies.services import get_user_service
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, PageResponse, UserReadWithRoles, \
+    PaginatedResponse
 from app.core.api_response import response_success, response_error, StandardResponse
 from app.core.response_codes import ResponseCodeEnum
 
@@ -31,6 +34,71 @@ async def get_user_info(
             message="用户不存在",
         )
     return response_success(data=UserRead.model_validate(user), message="获取用户信息成功")
+
+@router.get(
+    "/me",
+    response_model=StandardResponse[UserContext],
+    summary="获取当前登录用户的完整信息"
+)
+async def read_current_user(
+    # 这个依赖已经完成了所有工作：验证token、从数据库获取用户、角色、权限
+    current_user: UserContext = Depends(get_current_user)
+):
+    """
+    获取当前登录用户的完整上下文信息，包括：
+    - 基本个人资料
+    - 是否为超级用户
+    - 拥有的所有角色代码列表
+    - 聚合后的所有权限代码列表
+
+    前端通常在应用加载后立即调用此接口，以构建用户的“权限快照”。
+    """
+    # 直接返回依赖注入的结果即可，无需再调用 service
+    return response_success(data=current_user)
+
+
+@router.get(
+    "/",
+    response_model=StandardResponse[PageResponse],
+    summary="获取用户列表（带分页和筛选）"
+)
+async def read_users(
+    service: UserService = Depends(get_user_service),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    search: Optional[str] = Query(None, description="关键词搜索"),
+    is_active: Optional[bool] = Query(None, description="按用户是否激活状态筛选")
+):
+    """
+    获取用户列表，支持分页和筛选。
+    """
+    paged_response = await service.list_users(
+        page=page,
+        per_page=page_size,
+        search=search,
+        is_active=is_active,
+    )
+
+    # --- ⬇️ 这是我们新增的核心转换逻辑 ⬇️ ---
+    # 1. paged_response.items 是一个包含了原始数据库用户对象的列表
+    # 2. 我们使用列表推导式，遍历这个列表
+    # 3. 对每一个 user 对象，我们调用 UserReadWithRoles.model_validate() 来进行转换
+    #    因为您在 Schema 中设置了 from_attributes=True，Pydantic 会自动从对象属性中读取数据
+    validated_users_list = [
+        UserReadWithRoles.model_validate(user) for user in paged_response.items
+    ]
+    # --- ⬆️ 转换逻辑结束 ⬆️ ---
+
+    # 现在，我们用转换后、Pydantic 完全认得的数据来组装最终的响应
+    paginated_data = PaginatedResponse(
+        items=validated_users_list,
+        total=paged_response.total,
+        page=page,
+        per_page=page_size,
+        total_pages=paged_response.total_pages
+    )
+
+    return response_success(data=paginated_data, message="获取用户列表成功")
 
 # === Create User ===
 @router.post(

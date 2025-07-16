@@ -8,8 +8,8 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import selectinload
 
 from app.models.user import User, Role, UserRole
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles
-from app.db.crud.base_repo import BaseRepository, PageResponse
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, PageResponse
+from app.db.crud.base_repo import BaseRepository
 
 class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     def __init__(self, db: AsyncSession, context: Optional[dict] = None):
@@ -155,7 +155,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         items = items_result.scalars().unique().all()
 
         return PageResponse(
-            items=[UserReadWithRoles.from_orm(item) for item in items],  # 使用包含角色的 Pydantic 模型
+            items=items,  # 使用包含角色的 Pydantic 模型
             total=total,
             page=page,
             total_pages=ceil(total / per_page) if per_page > 0 else 0,

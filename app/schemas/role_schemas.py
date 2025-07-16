@@ -9,6 +9,7 @@ class RoleBase(BaseModel):
     """
     角色的基础模型，包含所有角色共有的核心字段。
     """
+    code: str = Field(..., description="角色的唯一代码，系统内部使用，例如：'content_editor'")
     name: str = Field(..., description="角色的唯一名称，例如：'admin', 'content_manager'")
     description: Optional[str] = Field(None, description="角色的详细描述。")
 
@@ -24,6 +25,7 @@ class RoleUpdate(RoleBase):
     """
     用于更新现有角色的模型，允许部分更新。
     """
+    code: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
 
