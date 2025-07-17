@@ -31,7 +31,21 @@ async def get_current_user(
     if not user or not user.is_active:
         raise InvalidTokenException(message="User not found or is inactive")
 
-    user_context = UserContext.model_validate(user)
+        # 1. 从 User ORM 对象中提取基础信息
+        #    model_dump() 会将 user 对象的基础属性转为字典
+    user_data = user.model_dump()
+
+    # 2. 手动将 Role 对象列表 转换为 角色代码的字符串列表
+    #    这正是为了匹配 UserContext 中 `roles: List[str]` 的定义
+    user_data['roles'] = [role.code for role in user.roles]
+
+    # 3. 直接使用 User 模型上已经计算好的权限集合
+    #    user.permissions 返回的是一个 set，我们将其转为 list 以匹配 UserContext 定义
+    user_data['permissions'] = list(user.permissions)
+
+    # 4. 用准备好的、结构完全匹配的数据字典来创建 UserContext 实例
+    #    这里的 **user_data 会将字典解包成关键字参数
+    user_context = UserContext(**user_data)
 
     return user_context
 

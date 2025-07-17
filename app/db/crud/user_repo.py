@@ -173,7 +173,10 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         final_query = (
             select(self.model)
             .where(self.model.id.in_(user_ids_for_page))
-            .options(selectinload(self.model.roles))
+            .options(
+                # 使用链式 selectinload 预加载 roles，以及 roles 内部的 permissions
+                selectinload(self.model.roles).selectinload(Role.permissions)
+            )
         )
         # 重新应用排序，以保证最终结果的顺序与分页ID的顺序一致
         final_query = self.apply_ordering(final_query, order_by)

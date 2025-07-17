@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime
 from math import ceil
-from sqlalchemy import asc, desc, or_, func
+from sqlalchemy import asc, desc, or_, func, update
 import logging
 import time
 
@@ -197,6 +197,23 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             logger.error(f"Update failed: {e}")
             raise
         return db_obj
+
+    async def update_by_id(self, item_id: Any, update_data: dict) -> bool:
+        """
+        根据ID和数据字典更新记录。
+        返回一个布尔值，表示是否至少有一行被更新。
+        """
+        if not update_data:
+            return False # 如果没有要更新的数据，直接返回
+
+        stmt = (
+            update(self.model)
+            .where(self.model.id == item_id)
+            .values(**update_data)
+        )
+        result = await self.db.execute(stmt)
+        # result.rowcount > 0 表示更新操作影响了至少一行
+        return result.rowcount > 0
 
     async def delete(self, id: UUID) -> bool:
         obj = await self.get_by_id(id)

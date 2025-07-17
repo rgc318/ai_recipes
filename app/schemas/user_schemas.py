@@ -1,4 +1,4 @@
-from typing import Annotated, Optional, List, Generic
+from typing import Annotated, Optional, List, Generic, Set
 from uuid import UUID
 from datetime import datetime
 
@@ -16,14 +16,11 @@ UsernameStr = Annotated[str, StringConstraints(min_length=3, max_length=30, to_l
 PasswordStr = Annotated[str, StringConstraints(min_length=8, strip_whitespace=True)]
 
 
-# ==========================
-# 🧾 用户创建模型
-# ==========================
-class UserCreate(BaseModel):
-    username: UsernameStr = Field(..., description="用户名（小写、去空格）")
+class UserBase(BaseModel):
+    full_name: Optional[str] = Field(None, description="完整姓名或昵称")
     email: Optional[EmailStr] = Field(None, description="邮箱地址")
     phone: Optional[str] = Field(None, description="手机号")
-    password: PasswordStr = Field(..., description="密码，最少 8 位")
+    avatar_url: Optional[str] = Field(None, description="头像 URL")
 
     @field_validator("phone", mode="before")
     @classmethod
@@ -32,10 +29,38 @@ class UserCreate(BaseModel):
             raise ValueError("手机号应为数字")
         return value
 
+# ==========================
+# 🧾 用户创建模型
+# ==========================
+class UserCreate(UserBase):
+    username: UsernameStr = Field(..., description="用户名")
+    password: PasswordStr = Field(..., description="密码，最少 8 位")
 
+
+# ==========================
+# 🔄 用户更新模型
+# ==========================
+class UserUpdate(UserBase):
+    password: Optional[PasswordStr] = Field(None, description="新密码，留空则不修改")
+    is_active: Optional[bool] = Field(None, description="是否激活账户")
+    is_superuser: Optional[bool] = Field(None, description="是否为超级用户")
+    is_verified: Optional[bool] = Field(None, description="是否已验证")  # <-- 新增
+    is_locked: Optional[bool] = Field(None, description="是否已锁定")  # <-- 新增
+    role_ids: Optional[List[UUID]] = Field(None, description="分配给用户的角色ID列表")
+
+# ==========================
+# 🙋 用户更新自己的个人资料模型
+# ==========================
+class UserUpdateProfile(BaseModel):
+    full_name: Optional[str] = Field(None, description="完整姓名或昵称")
+    email: Optional[EmailStr] = Field(None, description="邮箱地址")
+    phone: Optional[str] = Field(None, description="手机号")
+    avatar_url: Optional[str] = Field(None, description="头像 URL")
 # ==========================
 # 📤 用户读取模型
 # ==========================
+
+
 class UserRead(BaseModel):
     id: UUID
     username: str
@@ -45,21 +70,14 @@ class UserRead(BaseModel):
     is_active: bool
     is_superuser: bool
     is_verified: bool
+    is_locked: bool  # <-- 建议在Read模型也加上，以便前端展示
     created_at: datetime
     updated_at: datetime
+    last_login_at: Optional[datetime] = Field(None, description="上次登录时间")
 
     model_config = {
         "from_attributes": True
     }
-
-
-# ==========================
-# 🔄 用户更新模型
-# ==========================
-class UserUpdate(BaseModel):
-    full_name: Optional[str] = Field(None, description="完整姓名")
-    avatar_url: Optional[str] = Field(None, description="头像 URL")
-    password: Optional[PasswordStr] = Field(None, description="新密码，至少 8 位")
 
 class UserReadWithRoles(UserRead):
     """
@@ -67,6 +85,7 @@ class UserReadWithRoles(UserRead):
     主要用于后台管理的用户列表展示。
     """
     roles: List[RoleRead] = []
+    permissions: Set[str] = set()  # <-- 新增这一行
 # ==========================
 # 🔐 用户修改密码模型
 # ==========================
