@@ -12,7 +12,7 @@ import time
 from app.core.types.common import ModelType
 from app.db.repo_registrar import RepositoryRegistrar
 from app.metrics.repo_metrics import repository_sql_duration
-from app.schemas.user_schemas import PageResponse
+from app.schemas.page_schemas import PageResponse
 
 
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)

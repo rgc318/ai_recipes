@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
+
 from app.api.router import api_router
 from app.core.security.middleware import AuditMiddleware
 from app.db.session import create_db_and_tables
@@ -95,6 +97,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 #     # 记录审计日志
 #     response = await call_next(request)
 #     return response
+origins = ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(AuditMiddleware)
 app.include_router(api_router, prefix=settings.server.api_prefix)
 logger.info(app.routes)

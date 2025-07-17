@@ -57,7 +57,7 @@ class UserService(BaseService):
 
     # --- 用户列表 ---
 
-    async def list_users(
+    async def page_list_users(
             self,
             page: int = 1,
             per_page: int = 10,

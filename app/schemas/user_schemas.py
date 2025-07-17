@@ -105,29 +105,3 @@ class PrivateUser(BaseModel):
             return False
         lockout_expires_at = self.locked_at + timedelta(hours=settings.SECURITY_USER_LOCKOUT_TIME)
         return lockout_expires_at > datetime.now(UTC)
-
-
-# ==========================
-# 📦 分页数据容器模型
-# ==========================
-class PageResponse(BaseModel, Generic[ModelType]):
-    items: List[ModelType]
-    total: int
-    page: int
-    total_pages: int
-    per_page: int
-
-    model_config = {
-        "from_attributes": True
-    }
-
-class PaginatedResponse(BaseModel, Generic[T]):
-    items: List[T]
-    total: int
-    page: int
-    total_pages: int
-    per_page: int
-
-    model_config = {
-        "from_attributes": True  # 如果你使用的是 Pydantic v2，保留这个
-    }
