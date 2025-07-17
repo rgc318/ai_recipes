@@ -66,7 +66,9 @@ async def read_users(
     service: UserService = Depends(get_user_service),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量", alias="pageSize"),
-    search: Optional[str] = Query(None, description="关键词搜索"),
+    username: Optional[str] = Query(None, description="按用户名模糊搜索"),
+    email: Optional[str] = Query(None, description="按邮箱模糊搜索"),
+    phone: Optional[str] = Query(None, description="按电话模糊搜索"),
     is_active: Optional[bool] = Query(None, description="按用户是否激活状态筛选")
 ):
     """
@@ -77,7 +79,10 @@ async def read_users(
     paged_orm_response = await service.page_list_users(
         page=page,
         per_page=page_size,
-        search=search,
+        # --- ⬇️ 在这里把从URL获取的参数传递给服务层 ⬇️ ---
+        username=username,
+        email=email,
+        phone=phone,
         is_active=is_active,
     )
 
