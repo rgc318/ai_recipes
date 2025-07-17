@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -53,7 +53,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
     #     return await self._run_and_scalar(stmt, method="get_by_id")
 
     async def create(self, obj_in: RecipeCreate) -> Recipe:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         data = obj_in.model_dump()
         recipe = Recipe(
             title=data["title"],
@@ -82,7 +82,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         update_attrs = obj_in.model_dump(exclude_unset=True, exclude={"tag_ids", "ingredients"})
         for key, value in update_attrs.items():
             setattr(recipe, key, value)
-        recipe.updated_at = datetime.utcnow()
+        recipe.updated_at = datetime.now(timezone.utc)
 
         self.db.add(recipe)
 
@@ -101,7 +101,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         if not recipe:
             return None
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         recipe.is_deleted = True
         recipe.deleted_at = now
         recipe.updated_at = now

@@ -18,6 +18,7 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
     def __init__(self, repo_factory: RepositoryFactory, data: CredentialsRequest):
         super().__init__(repo_factory=repo_factory, data=data)
         self._user: PrivateUser | None = None  # ✅ 实例变量
+        self.user_service = UserService(repo_factory)
 
     async def authenticate(self) -> tuple[str, timedelta] | None:
         user = await self.get_user_by_identity(self.data.username)
@@ -50,17 +51,12 @@ class CredentialsProvider(AuthProvider[CredentialsRequest]):
         )
 
     async def _handle_failed_login(self, user: PrivateUser):
-        user.login_attempts += 1
-        await self.db.user.update(user.id, user)
-
-        if user.login_attempts >= settings.security_settings.max_login_attempts:
-            await UserService(self.db).lock_user(user)
-            logger.warning(f"User {user.username} locked due to failed attempts")
+        """【优化】委托给 UserService 处理"""
+        await self.user_service.record_failed_login(user.id)
 
     async def _handle_successful_login(self, user: PrivateUser):
-        user.login_attempts = 0
-        user.last_login_at = datetime.utcnow()
-        await self.db.user.update(user.id, user)
+        """【优化】委托给 UserService 处理"""
+        await self.user_service.record_successful_login(user.id)
 
     def _verify_password(self, plain: str, hashed: str) -> bool:
         return get_hasher().verify(plain, hashed)
