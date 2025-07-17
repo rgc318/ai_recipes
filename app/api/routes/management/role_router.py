@@ -16,6 +16,27 @@ from app.schemas.page_schemas import PageResponse
 router = APIRouter(dependencies=[Depends(require_superuser)])
 
 
+@router.get(
+    "/all",
+    response_model=StandardResponse[PageResponse[RoleRead]], # 假设你需要分页列表
+    summary="获取角色列表"
+)
+async def list_roles(
+    page: int = 1,
+    per_page: int = 10,
+    service: RoleService = Depends(get_role_service)
+):
+    """
+    获取所有角色的分页列表。
+    - 需要管理员权限。
+    """
+
+
+    roles = await service.list_roles(skip=(page - 1) * per_page, limit=per_page)
+    # 一个更完整的实现会返回一个包含 total, page, per_page 的 PageResponse 对象
+    # 这里为了演示，我们直接返回列表
+    return response_success(data=[RoleRead.model_validate(role) for role in roles])
+
 @router.post(
     "/",
     response_model=StandardResponse[RoleRead],
@@ -35,27 +56,7 @@ async def create_role(
     return response_success(data=RoleRead.model_validate(new_role), message="角色创建成功")
 
 
-@router.get(
-    "/",
-    response_model=StandardResponse[PageResponse[RoleRead]], # 假设你需要分页列表
-    summary="获取角色列表"
-)
-async def list_roles(
-    page: int = 1,
-    per_page: int = 10,
-    service: RoleService = Depends(get_role_service)
-):
-    """
-    获取所有角色的分页列表。
-    - 需要管理员权限。
-    """
-    # 注意：这里我们假设 RoleService 中有一个 list_roles_paginated 方法
-    # 如果没有，我们可以简单调用 service.list_roles(skip=(page-1)*per_page, limit=per_page)
-    # 为了简化，我们先直接调用 list_roles
-    roles = await service.list_roles(skip=(page - 1) * per_page, limit=per_page)
-    # 一个更完整的实现会返回一个包含 total, page, per_page 的 PageResponse 对象
-    # 这里为了演示，我们直接返回列表
-    return response_success(data=[RoleRead.model_validate(role) for role in roles])
+
 
 
 @router.get(

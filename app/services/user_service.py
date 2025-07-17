@@ -4,7 +4,7 @@ from typing import List, Optional
 from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException
 from app.db.repository_factory_auto import RepositoryFactory
 from app.models.user import User, Role
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile
 from app.core.security.password_utils import get_password_hash
 from app.db.crud.user_repo import UserRepository
 from app.db.crud.role_repo import RoleRepository
@@ -95,15 +95,37 @@ class UserService(BaseService):
         return await self.user_repo.create(user_data)
 
     async def update_user(self, user_id: UUID, updates: UserUpdate) -> User:
-        """更新用户信息。"""
-        # 【修正】先获取用户实体，再将实体传递给 repo 的 update 方法
-        existing_user = await self.get_user_by_id(user_id)
+        """
+        一个功能完备的用户更新方法，能精细化处理密码、角色和基础信息。
+        """
+        # 1. 将传入的 Pydantic 模型转换为字典，只包含前端提交了的字段
+        update_data = updates.model_dump(exclude_unset=True)
 
-        if updates.email and updates.email != existing_user.email:
-            if await self.user_repo.get_by_email(updates.email):
-                raise AlreadyExistsException("邮箱已被注册")
+        # 2. 【特殊处理】分离并处理密码
+        # 如果前端提交了 password 字段，则单独处理
+        if "password" in update_data and update_data["password"]:
+            new_password = update_data.pop("password")
+            hashed_password = get_password_hash(new_password)
+            # 直接更新密码字段
+            await self.user_repo.update_by_id(user_id, {"hashed_password": hashed_password})
 
-        return await self.user_repo.update(user_id, updates)
+        # 3. 【特殊处理】分离并处理角色
+        # 如果前端提交了 role_ids 字段，则调用专门的方法来设置角色
+        if "role_ids" in update_data:
+            role_ids = update_data.pop("role_ids")
+            # 调用我们已经写好的 set_user_roles 方法
+            await self.set_user_roles(user_id, role_ids)
+
+        # 4. 【常规处理】更新剩下的常规字段
+        # 如果 update_data 中还有其他字段（如 email, full_name, is_active 等），则进行更新
+        if update_data:
+            # 同样可以调用一个简单的 update 方法
+            await self.user_repo.update_by_id(user_id, update_data)
+
+        # 5. 返回更新后最新的、最完整的用户数据
+        # 使用 get_user_with_roles 来确保返回的用户信息包含了最新的角色
+        updated_user = await self.get_user_with_roles(user_id)
+        return updated_user
 
     async def delete_user(self, user_id: UUID) -> bool:
         """软删除一个用户。"""
@@ -152,3 +174,21 @@ class UserService(BaseService):
                 raise NotFoundException("一个或多个角色不存在")
 
         return await self.user_repo.set_user_roles(user, roles)
+
+    # 【新增】一个专门给用户更新自己信息的方法
+    async def update_profile(self, user_id: UUID, updates: UserUpdateProfile) -> User:
+        """
+        用户更新自己的个人资料，只允许修改部分字段。
+        """
+        # 1. 检查邮箱是否冲突 (如果提供了邮箱)
+        if updates.email:
+            existing_user_by_email = await self.user_repo.get_by_email(updates.email)
+            if existing_user_by_email and existing_user_by_email.id != user_id:
+                raise AlreadyExistsException("邮箱已被注册")
+
+        # 2. 将 Pydantic 模型转为字典，并更新数据库
+        update_data = updates.model_dump(exclude_unset=True)
+        await self.user_repo.update_by_id(user_id, update_data)
+
+        # 3. 返回更新后的用户对象
+        return await self.get_user_by_id(user_id)
