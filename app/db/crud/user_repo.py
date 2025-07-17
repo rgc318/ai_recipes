@@ -103,7 +103,9 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             page: int = 1,
             per_page: int = 10,
             order_by: str = "created_at:desc",
-            search: Optional[str] = None,
+            username: Optional[str] = None,
+            email: Optional[str] = None,
+            phone: Optional[str] = None,
             role_ids: Optional[List[UUID]] = None,
             is_active: Optional[bool] = None,
     ) -> PageResponse[UserReadWithRoles]:
@@ -123,6 +125,16 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         # 2. 应用过滤条件
         query = query.where(self.model.is_deleted == False)
 
+        # 针对每个独立字段，如果传入了值，就添加一个 WHERE 条件
+        if username:
+            query = query.where(self.model.username.ilike(f"%{username}%"))
+
+        if email:
+            query = query.where(self.model.email.ilike(f"%{email}%"))
+
+        if phone:
+            query = query.where(self.model.phone.ilike(f"%{phone}%"))
+
         if is_active is not None:
             query = query.where(self.model.is_active == is_active)
 
@@ -131,15 +143,6 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             # 使用 distinct() 确保在 join 后每个用户只被考虑一次
             query = query.join(UserRole, self.model.id == UserRole.user_id).where(
                 UserRole.role_id.in_(role_ids)).distinct()
-
-        # 3. 应用模糊搜索
-        if search:
-            search_term = f"%{search}%"
-            query = query.where(
-                (self.model.username.ilike(search_term)) |
-                (self.model.email.ilike(search_term)) |
-                (self.model.full_name.ilike(search_term))
-            )
 
         # --- 执行计数查询 (第一步) ---
         # 在应用了所有过滤和JOIN之后，但在应用分页和排序之前，进行计数

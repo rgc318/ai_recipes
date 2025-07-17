@@ -58,18 +58,23 @@ class UserService(BaseService):
     # --- 用户列表 ---
 
     async def page_list_users(
-            self,
-            page: int = 1,
-            per_page: int = 10,
-            order_by: str = "created_at:desc",
-            search: Optional[str] = None,
-            role_ids: Optional[List[UUID]] = None,
-            is_active: Optional[bool] = None,
+        self,
+        page: int = 1,
+        per_page: int = 10,
+        order_by: str = "created_at:desc",
+        # --- ⬇️ 在这里同步修改参数 ⬇️ ---
+        username: Optional[str] = None,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        role_ids: Optional[List[UUID]] = None,
     ) -> PageResponse[UserReadWithRoles]:
         """获取用户分页列表，封装了复杂的查询逻辑。"""
         return await self.user_repo.get_paged_users(
             page=page, per_page=per_page, order_by=order_by,
-            search=search, role_ids=role_ids, is_active=is_active
+            # --- ⬇️ 在这里把新参数传递下去 ⬇️ ---
+            username=username, email=email, phone=phone,
+            is_active=is_active, role_ids=role_ids
         )
 
     # --- 用户操作 ---
