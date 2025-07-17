@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -37,6 +37,25 @@ class PermissionRead(PermissionBase):
     包含了数据库生成的ID，并配置为可从ORM对象转换。
     """
     id: UUID
+
+    class Config:
+        from_attributes = True
+
+
+class PermissionSyncResponse(BaseModel):
+    """
+    用于权限同步操作的响应模型。
+    提供了操作的统计摘要和详细列表。
+    """
+    total: int = Field(..., description="本次同步请求中包含的权限总数。")
+    found: int = Field(..., description="在数据库中已存在的权限数量。")
+    created: int = Field(..., description="本次同步中新创建的权限数量。")
+
+    # 包含详细信息，便于日志记录或前端展示更丰富的反馈
+    created_items: List[PermissionRead] = Field(
+        default=[],
+        description="本次新创建的权限对象的详细列表。"
+    )
 
     class Config:
         from_attributes = True

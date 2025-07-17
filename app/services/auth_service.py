@@ -12,6 +12,7 @@ from app.models import User
 from app.schemas.user_schemas import UserCreate
 from app.core.security.password_utils import get_password_hash, verify_password
 from app.services._base_service import BaseService
+from app.services.user_service import UserService
 from app.utils.jwt_utils import decode_token, revoke_token, create_refresh_token
 from app.enums.auth_method import AuthMethod
 from app.core.exceptions import UserLockedOutException, UserAlreadyExistsException, AlreadyExistsException, \
@@ -34,6 +35,7 @@ AUTH_PROVIDER_REGISTRY: dict[AuthMethod, Type[AuthProvider]] = {
 class AuthService(BaseService):
     def __init__(self, repo_factory: RepositoryFactory):
         super().__init__()  # 【修改3】调用父类的构造函数，注入 settings 和 logger
+        self.user_service: UserService = UserService(repo_factory)
         self.factory = repo_factory
         self.user_repo: UserRepository = repo_factory.user
 
@@ -49,8 +51,15 @@ class AuthService(BaseService):
         user_data["hashed_password"] = hashed_password
         user_data["auth_method"] = AuthMethod.app  # 默认使用账号密码注册
 
-        user_orm = await self.user_repo.create(user_data)
-        return user_orm
+        try:
+            # 3. 调用不带commit的repo.create方法
+            user_orm = await self.user_repo.create(user_data)
+            # 4. 在Service层决定提交事务
+            await self.user_repo.commit()
+            return user_orm
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
 
     async def login_user(self, method: AuthMethod, data: BaseModel) -> dict[str, str | timedelta | Any]:
         """
@@ -95,8 +104,7 @@ class AuthService(BaseService):
         if not verify_password(old_password, user.password):
             raise UnauthorizedException("旧密码不正确")
 
-        hashed_password = get_password_hash(new_password)
-        await self.user_repo.update(user.id, {"password": hashed_password})
+        await self.user_service.change_password(user_id, new_password)
         return True
 
     async def reset_password(self, email: str, new_password: str) -> bool:
@@ -105,8 +113,8 @@ class AuthService(BaseService):
             raise NotFoundException("用户不存在")
         if not user.is_active:
             raise UnauthorizedException("用户账户已被禁用")
-        hashed_password = get_password_hash(new_password)
-        await self.user_repo.update(user.id, {"hashed_password": hashed_password})
+
+        await self.user_service.reset_password_by_email(email, new_password)
         return True
 
     async def logout_user(self, token: str) -> bool:

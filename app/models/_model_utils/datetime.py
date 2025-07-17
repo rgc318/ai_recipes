@@ -1,8 +1,9 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 
 from sqlalchemy.types import DateTime, TypeDecorator
 
-
+def utcnow():
+    return datetime.now(timezone.utc)
 def get_utc_now():
     """
     Returns the current time in UTC.

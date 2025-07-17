@@ -1,5 +1,5 @@
 from types import NoneType
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,31 +79,30 @@ async def update_my_profile(
     response_model=StandardResponse[PageResponse[UserReadWithRoles]],
     summary="获取用户列表（带分页和筛选）"
 )
-async def read_users(
+async def list_users(
     service: UserService = Depends(get_user_service),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量", alias="pageSize"),
+    order_by: str = Query("created_at:desc", description="排序字段"),
     username: Optional[str] = Query(None, description="按用户名模糊搜索"),
     email: Optional[str] = Query(None, description="按邮箱模糊搜索"),
     phone: Optional[str] = Query(None, description="按电话模糊搜索"),
-    is_active: Optional[bool] = Query(None, description="按用户是否激活状态筛选")
+    is_active: Optional[bool] = Query(None, description="按用户是否激活状态筛选"),
+    role_ids: Optional[List[UUID]] = Query(None, description="按角色ID列表筛选用户")
 ):
     """
     获取用户列表，支持分页和筛选。
     FastAPI会根据response_model自动将ORM对象转换为Pydantic模型。
     """
     # 直接从service层获取包含ORM对象的响应
-    paged_orm_response = await service.page_list_users(
-        page=page,
-        per_page=page_size,
-        username=username,
-        email=email,
-        phone=phone,
-        is_active=is_active,
+    page_data = await service.page_list_users(
+        page=page, per_page=page_size, order_by=order_by,
+        username=username, email=email, phone=phone,
+        is_active=is_active, role_ids=role_ids
     )
 
     # 直接将它作为数据返回，FastAPI会处理剩下的一切
-    return response_success(data=paged_orm_response, message="获取用户列表成功")
+    return response_success(data=page_data, message="获取用户列表成功")
 
 # === Create User ===
 @router.post(
@@ -112,18 +111,8 @@ async def read_users(
     status_code=status.HTTP_200_OK
 )
 async def create_user(user_data: UserCreate, service: UserService = Depends(get_user_service)):
-    try:
-        user = await service.create_user(user_data)
-        return response_success(
-            data=user,
-            code=ResponseCodeEnum.CREATED,
-            message="用户创建成功"
-        )
-    except ValueError as e:
-        return response_error(
-            code=ResponseCodeEnum.USER_ALREADY_EXISTS,
-            message=str(e)
-        )
+    new_user = await service.create_user(user_data)
+    return response_success(data=new_user, message="用户创建成功")
 
 
 # === Get User By ID ===

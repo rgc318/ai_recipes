@@ -65,6 +65,7 @@ class UserRead(BaseModel):
     id: UUID
     username: str
     email: Optional[str]
+    phone: Optional[str]
     full_name: Optional[str]
     avatar_url: Optional[str]
     is_active: bool

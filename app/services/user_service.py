@@ -1,15 +1,23 @@
+from datetime import datetime, timezone
 from uuid import UUID
 from typing import List, Optional
 
-from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException
+from sqlalchemy.orm.exc import StaleDataError
+
+from app.config import settings
+from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException, \
+    ConcurrencyConflictException, UnauthorizedException
 from app.db.repository_factory_auto import RepositoryFactory
 from app.models.user import User, Role
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile
-from app.core.security.password_utils import get_password_hash
+from app.core.security.password_utils import get_password_hash, verify_password
 from app.db.crud.user_repo import UserRepository
 from app.db.crud.role_repo import RoleRepository
 from app.db.crud.base_repo import PageResponse
 from app.services._base_service import BaseService
+
+
+
 
 
 class UserService(BaseService):
@@ -92,64 +100,127 @@ class UserService(BaseService):
         user_data = user_in.model_dump(exclude={"password"})
         user_data["hashed_password"] = hashed_password
 
-        return await self.user_repo.create(user_data)
+        try:
+            # 3. 调用不带commit的repo.create方法
+            new_user = await self.user_repo.create(user_data)
+            # 4. 在Service层决定提交事务
+            await self.user_repo.commit()
+            return new_user
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
 
     async def update_user(self, user_id: UUID, updates: UserUpdate) -> User:
         """
-        一个功能完备的用户更新方法，能精细化处理密码、角色和基础信息。
+        一个功能完备且具备事务原子性的用户更新方法。
         """
-        # 1. 将传入的 Pydantic 模型转换为字典，只包含前端提交了的字段
+        # 1. 【读取】开启一个事务，并获取"实时"的user ORM对象
+        #    get_user_with_roles 确保了 user.roles 已被预加载
+        user_to_update = await self.get_user_with_roles(user_id)
+
+        # 2. 【数据准备】将传入的Pydantic模型转为字典，只包含需要更新的字段
         update_data = updates.model_dump(exclude_unset=True)
 
-        # 2. 【特殊处理】分离并处理密码
-        # 如果前端提交了 password 字段，则单独处理
+        # 3. 【业务校验】在提交前完成所有校验
+        # 检查邮箱唯一性
+        new_email = update_data.get("email")
+        if new_email and new_email != user_to_update.email:
+            if await self.user_repo.get_by_email(new_email):
+                raise AlreadyExistsException("邮箱已被注册")
+
+        # 4. 【内存中修改】分离并处理特殊字段
+        # 处理密码
         if "password" in update_data and update_data["password"]:
             new_password = update_data.pop("password")
-            hashed_password = get_password_hash(new_password)
-            # 直接更新密码字段
-            await self.user_repo.update_by_id(user_id, {"hashed_password": hashed_password})
+            user_to_update.hashed_password = get_password_hash(new_password)
 
-        # 3. 【特殊处理】分离并处理角色
-        # 如果前端提交了 role_ids 字段，则调用专门的方法来设置角色
+        # 处理角色
         if "role_ids" in update_data:
             role_ids = update_data.pop("role_ids")
-            # 调用我们已经写好的 set_user_roles 方法
-            await self.set_user_roles(user_id, role_ids)
+            # 如果 role_ids 是一个有效列表，则更新用户的角色
+            if role_ids is not None:
+                # 1. 获取 Role 对象列表
+                roles = []
+                unique_role_ids = list(set(role_ids))
+                if unique_role_ids:
+                    roles = await self.role_repo.get_by_ids(unique_role_ids)
+                    if len(roles) != len(unique_role_ids):
+                        raise NotFoundException("一个或多个角色不存在")
+                    # 2. 直接在内存中修改 user.roles 属性
+                    #    这正是 user_repo.set_user_roles 所做的事情
+                    user_to_update.roles = roles
 
-        # 4. 【常规处理】更新剩下的常规字段
-        # 如果 update_data 中还有其他字段（如 email, full_name, is_active 等），则进行更新
+        # 5. 【内存中修改】使用通用的update方法更新剩下的常规字段
         if update_data:
-            # 同样可以调用一个简单的 update 方法
-            await self.user_repo.update_by_id(user_id, update_data)
+            # 这个update方法现在只在内存中修改user_to_update对象的属性
+            await self.user_repo.update(user_to_update, update_data)
 
-        # 5. 返回更新后最新的、最完整的用户数据
-        # 使用 get_user_with_roles 来确保返回的用户信息包含了最新的角色
-        updated_user = await self.get_user_with_roles(user_id)
-        return updated_user
+        try:
+            # 6. 【写入】一次性提交所有在内存中所做的修改
+            await self.user_repo.commit()
+            # 刷新对象以获取数据库生成的最新状态（如updated_at）
+            await self.user_repo.refresh(user_to_update)
+        except StaleDataError:
+            await self.user_repo.rollback()
+            raise ConcurrencyConflictException("操作失败，数据已被他人修改，请刷新后重试")
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
 
-    async def delete_user(self, user_id: UUID) -> bool:
-        """软删除一个用户。"""
-        await self.get_user_by_id(user_id)  # 确保用户存在
-        return await self.user_repo.soft_delete(user_id)
+        return user_to_update
 
-    async def lock_user(self, user_id: UUID) -> bool:
+    async def delete_user(self, user_id: UUID) -> None:
+        user = await self.get_user_by_id(user_id)
+        try:
+            await self.user_repo.soft_delete(user)
+            await self.user_repo.commit()
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
+
+    async def lock_user(self, user_id: UUID) -> None:
         """
         锁定一个用户账户。
-        【修正】重构此方法以提高代码复用性和一致性。
+        【风格优化】使用公共的 repo 方法。
         """
-        await self.get_user_by_id(user_id)  # 确保用户存在
-        return await self.user_repo._update_single_field(user_id, "is_locked", True)
+        # 先校验用户是否存在，这是一个好习惯
+        await self.get_user_by_id(user_id)
+
+        # 这是一个独立的业务事务
+        try:
+            # 使用 update_by_id，这是一个公开且高效的方法
+            rows_affected = await self.user_repo.update_by_id(
+                user_id,
+                {"is_locked": True}
+            )
+            if rows_affected == 0:
+                # 理论上 get_user_by_id 已经检查过，但这是一个更深层次的保险
+                raise UserNotFoundException()
+
+            await self.user_repo.commit()
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
 
     # --- 用户与角色的关联管理 ---
 
     async def assign_role_to_user(self, user_id: UUID, role_id: UUID) -> User:
-        """为用户分配一个角色。"""
         user = await self.get_user_with_roles(user_id)
         role = await self.role_repo.get_by_id(role_id)
         if not role:
             raise NotFoundException("角色不存在")
 
-        return await self.user_repo.assign_role_to_user(user, role)
+        # 避免重复添加
+        if role in user.roles:
+            return user
+
+        try:
+            updated_user = await self.user_repo.assign_role_to_user(user, role)
+            await self.user_repo.commit()  # <--- 必须添加 commit
+            return updated_user
+        except Exception as e:
+            await self.user_repo.rollback()  # <--- 必须添加 rollback
+            raise e
 
     async def revoke_role_from_user(self, user_id: UUID, role_id: UUID) -> User:
         """从用户中撤销一个角色。"""
@@ -158,37 +229,186 @@ class UserService(BaseService):
         if not role:
             raise NotFoundException("角色不存在")
 
-        return await self.user_repo.revoke_role_from_user(user, role)
+        try:
+            revoke_user = await self.user_repo.revoke_role_from_user(user, role)
+            await self.user_repo.commit()
+            return revoke_user
+        except Exception as e:
+            await self.user_repo.rollback()  # <--- 必须添加 rollback
+            raise e
 
-    async def set_user_roles(self, user_id: UUID, role_ids: List[UUID]) -> User:
+
+    async def set_user_roles(self, user_id: UUID, role_ids: List[UUID], pre_fetched_user: User = None) -> User:
         """批量设置一个用户的所有角色。"""
-        user = await self.get_user_with_roles(user_id)
+        # 如果没有传入预查询的用户，则自己查询
+        user = pre_fetched_user or await self.get_user_with_roles(user_id)
 
         roles = []
         if role_ids:
-            # 【修正】使用更健壮的 set() 来处理可能重复的 role_ids
             unique_role_ids = list(set(role_ids))
-            # 假设你的 BaseRepository 中有一个 get_by_ids 方法
             roles = await self.role_repo.get_by_ids(unique_role_ids)
             if len(roles) != len(unique_role_ids):
                 raise NotFoundException("一个或多个角色不存在")
 
-        return await self.user_repo.set_user_roles(user, roles)
+
+
+        try:
+            # 调用 repo 层方法，该方法不 commit
+            updated_user = await self.user_repo.set_user_roles(user, roles)
+            await self.user_repo.commit()
+            await self.user_repo.refresh(updated_user)
+            return updated_user
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
 
     # 【新增】一个专门给用户更新自己信息的方法
     async def update_profile(self, user_id: UUID, updates: UserUpdateProfile) -> User:
-        """
-        用户更新自己的个人资料，只允许修改部分字段。
-        """
-        # 1. 检查邮箱是否冲突 (如果提供了邮箱)
-        if updates.email:
-            existing_user_by_email = await self.user_repo.get_by_email(updates.email)
-            if existing_user_by_email and existing_user_by_email.id != user_id:
+        """用户更新自己的个人资料，也需要在一个事务中完成。"""
+        # 1. 同样先获取用户对象，以支持乐观锁
+        user = await self.get_user_by_id(user_id)
+
+        # 2. 业务校验
+        update_data = updates.model_dump(exclude_unset=True)
+        new_email = update_data.get("email")
+        if new_email and new_email != user.email:
+            if await self.user_repo.get_by_email(new_email):
                 raise AlreadyExistsException("邮箱已被注册")
 
-        # 2. 将 Pydantic 模型转为字典，并更新数据库
-        update_data = updates.model_dump(exclude_unset=True)
-        await self.user_repo.update_by_id(user_id, update_data)
+        # 3. 在内存中更新
+        await self.user_repo.update(user, update_data)
 
-        # 3. 返回更新后的用户对象
-        return await self.get_user_by_id(user_id)
+        try:
+            # 4. 统一提交
+            await self.user_repo.commit()
+            await self.user_repo.refresh(user)
+        except StaleDataError:
+            await self.user_repo.rollback()
+            raise ConcurrencyConflictException("保存失败，您的个人资料可能已被系统更新，请刷新页面")
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
+
+        return user
+
+    async def change_password(self, user_id: UUID, new_plain_password: str) -> None:
+        """
+        为一个指定用户修改密码。这是一个独立的业务事务。
+        """
+        # Service层负责业务逻辑：密码必须经过哈希
+        hashed_password = get_password_hash(new_plain_password)
+        try:
+            # Service层负责调用Repo层的基础操作
+            rows_affected = await self.user_repo.update_by_id(
+                user_id,
+                {"hashed_password": hashed_password}
+            )
+            if rows_affected == 0:
+                raise UserNotFoundException()  # 如果没有行被更新，说明用户不存在
+
+            # Service层负责提交事务
+            await self.user_repo.commit()
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
+
+    async def change_password_with_verification(
+            self, user_id: UUID, old_plain_password: str, new_plain_password: str
+    ) -> None:
+        """
+        【新增】用户修改自己的密码，需要验证旧密码。
+        """
+        user = await self.get_user_by_id(user_id)
+
+        # 业务逻辑：验证旧密码
+        if not verify_password(old_plain_password, user.hashed_password):
+            raise UnauthorizedException("旧密码不正确")
+
+        # 复用已有的、不验证旧密码的 change_password 方法
+        await self.change_password(user_id, new_plain_password)
+
+    async def reset_password_by_email(self, email: str, new_plain_password: str) -> None:
+        """
+        【新增】通过邮箱重置密码。
+        """
+        user = await self.user_repo.get_by_email(email)
+        if not user:
+            raise NotFoundException("该邮箱未注册")
+        if not user.is_active:
+            raise UnauthorizedException("用户账户已被禁用")
+
+        # 直接调用 change_password 来完成密码更新和事务
+        await self.change_password(user.id, new_plain_password)
+
+    async def set_user_active_status(self, user_id: UUID, is_active: bool) -> bool:
+        """
+        设置用户的激活状态 (启用或禁用)。这是一个独立的业务事务。
+        """
+        # 先校验用户是否存在，这是一个好习惯
+        await self.get_user_by_id(user_id)
+
+        try:
+            rows_affected = await self.user_repo.update_by_id(
+                user_id,
+                {"is_active": is_active}
+            )
+            await self.user_repo.commit()
+            return rows_affected > 0
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
+
+    async def update_last_login(self, user_id: UUID) -> None:
+        """
+        更新用户最后登录时间。这是一个独立的业务事务。
+        """
+        try:
+            await self.user_repo.update_by_id(
+                user_id,
+                {"last_login_at": datetime.now(timezone.utc)}
+            )
+            await self.user_repo.commit()
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
+
+    async def record_failed_login(self, user_id: UUID) -> None:
+        """
+        【新增】记录一次失败的登录尝试，并在需要时锁定用户。
+        这是一个独立的业务事务。
+        """
+        user = await self.get_user_by_id(user_id)
+
+        # 增加尝试次数
+        new_attempts = user.login_attempts + 1
+
+        update_data = {"login_attempts": new_attempts}
+
+        # 检查是否达到最大尝试次数
+        if new_attempts >= settings.security_settings.max_login_attempts:
+            update_data["is_locked"] = True
+            self.logger.warning(f"用户 {user.username} 因登录失败次数过多而被锁定。")
+
+        try:
+            # 使用高效的 update_by_id 一次性更新所有字段
+            await self.user_repo.update_by_id(user.id, update_data)
+            await self.user_repo.commit()
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e
+
+    async def record_successful_login(self, user_id: UUID) -> None:
+        """
+        【新增】记录一次成功的登录，重置尝试次数并更新登录时间。
+        这是一个独立的业务事务。
+        """
+        update_data = {
+            "login_attempts": 0,
+            "last_login_at": datetime.now(timezone.utc)
+        }
+        try:
+            await self.user_repo.update_by_id(user_id, update_data)
+            await self.user_repo.commit()
+        except Exception as e:
+            await self.user_repo.rollback()
+            raise e

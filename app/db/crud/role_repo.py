@@ -16,14 +16,16 @@ class RoleRepository(BaseRepository[Role, RoleCreate, RoleUpdate]):
     def __init__(self, db: AsyncSession, context: Optional[dict] = None):
         super().__init__(db, Role, context)
 
+    async def get_by_code(self, code: str) -> Optional[Role]:
+        """
+        根据角色的唯一代码获取角色。
+        (建议使用 code 而非 name 作为唯一标识)
+        """
+        stmt = self._base_stmt().where(self.model.code == code)
+        return await self._run_and_scalar(stmt, "get_by_code")
+
     async def get_by_name(self, name: str) -> Optional[Role]:
-        """
-        根据角色的唯一名称获取角色。
-        """
-        stmt = select(self.model).where(
-            self.model.name == name,
-            self.model.is_deleted == False
-        )
+        stmt = self._base_stmt().where(self.model.name == name)
         return await self._run_and_scalar(stmt, "get_by_name")
 
     async def get_by_id_with_permissions(self, role_id: UUID) -> Optional[Role]:
@@ -32,8 +34,8 @@ class RoleRepository(BaseRepository[Role, RoleCreate, RoleUpdate]):
         这是获取角色详情时避免 N+1 查询问题的最佳实践。
         """
         stmt = (
-            select(self.model)
-            .where(self.model.id == role_id, self.model.is_deleted == False)
+            self._base_stmt()
+            .where(self.model.id == role_id)
             .options(selectinload(self.model.permissions))
         )
         result = await self.db.execute(stmt)
@@ -41,46 +43,30 @@ class RoleRepository(BaseRepository[Role, RoleCreate, RoleUpdate]):
 
     async def add_permission_to_role(self, role: Role, permission: Permission) -> Role:
         """
-        为指定角色添加一个权限。
-        在操作前会检查权限是否已存在，避免重复添加。
+        在内存中为指定角色添加一个权限。不提交事务。
         """
         if permission not in role.permissions:
             role.permissions.append(permission)
             self.db.add(role)
-            try:
-                await self.db.commit()
-                await self.db.refresh(role)
-            except Exception:
-                await self.db.rollback()
-                raise
+            await self.db.flush()
         return role
 
     async def remove_permission_from_role(self, role: Role, permission: Permission) -> Role:
         """
-        从指定角色中移除一个权限。
+        在内存中从指定角色中移除一个权限。不提交事务。
         """
         if permission in role.permissions:
             role.permissions.remove(permission)
             self.db.add(role)
-            try:
-                await self.db.commit()
-                await self.db.refresh(role)
-            except Exception:
-                await self.db.rollback()
-                raise
+            await self.db.flush()
         return role
 
     async def set_role_permissions(self, role: Role, permissions: List[Permission]) -> Role:
         """
-        批量设置一个角色的所有权限，此操作会完全覆盖该角色原有的所有权限。
-        这是一个非常实用的批量操作，常用于后台管理界面的“保存”功能。
+        在内存中批量设置一个角色的所有权限。不提交事务。
         """
         role.permissions = permissions
         self.db.add(role)
-        try:
-            await self.db.commit()
-            await self.db.refresh(role)
-        except Exception:
-            await self.db.rollback()
-            raise
+        await self.db.flush()
+        await self.db.refresh(role)
         return role
