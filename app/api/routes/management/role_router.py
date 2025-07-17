@@ -8,7 +8,7 @@ from app.services.role_service import RoleService
 from app.schemas.role_schemas import RoleCreate, RoleUpdate, RoleRead, RoleReadWithPermissions
 from app.schemas.user_schemas import UserRead # 如果需要返回用户信息
 from app.core.api_response import response_success, StandardResponse
-from app.db.crud.base_repo import PageResponse
+from app.schemas.page_schemas import PageResponse
 
 # 创建一个专门用于角色管理的路由器
 # 我们在这里使用 dependencies=[Depends(require_admin)]

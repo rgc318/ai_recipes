@@ -8,7 +8,8 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import selectinload
 
 from app.models.user import User, Role, UserRole
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, PageResponse
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles
+from app.schemas.page_schemas import PageResponse
 from app.db.crud.base_repo import BaseRepository
 
 class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
@@ -107,7 +108,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             is_active: Optional[bool] = None,
     ) -> PageResponse[UserReadWithRoles]:
         """
-        一个功能强大的用户列表查询方法，支持：
+        一个功能强大的用户列表查询方法（修复版），支持：
         - 分页 (Pagination)
         - 排序 (Ordering)
         - 模糊搜索 (Search on username, email, full_name)
@@ -115,47 +116,71 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         - 按激活状态过滤 (Filtering by active status)
         - 高效加载用户的角色信息 (Eager loading roles)
         """
-        # 1. 构建基础查询语句，并预加载角色信息以避免 N+1 问题
-        stmt = select(self.model).options(selectinload(self.model.roles))
+        # --- 构建通用的过滤和JOIN逻辑 ---
+        # 1. 基础查询语句
+        query = select(self.model)
 
         # 2. 应用过滤条件
-        # 基础过滤：只查询未被软删除的用户
-        stmt = stmt.where(self.model.is_deleted == False)
+        query = query.where(self.model.is_deleted == False)
 
-        # 按激活状态过滤
         if is_active is not None:
-            stmt = stmt.where(self.model.is_active == is_active)
+            query = query.where(self.model.is_active == is_active)
 
         # 按角色ID过滤 (关键的多表查询逻辑)
         if role_ids:
-            # 我们需要 JOIN UserRole 中间表来进行过滤
-            stmt = stmt.join(UserRole, self.model.id == UserRole.user_id).where(UserRole.role_id.in_(role_ids))
+            # 使用 distinct() 确保在 join 后每个用户只被考虑一次
+            query = query.join(UserRole, self.model.id == UserRole.user_id).where(
+                UserRole.role_id.in_(role_ids)).distinct()
 
         # 3. 应用模糊搜索
         if search:
             search_term = f"%{search}%"
-            stmt = stmt.where(
+            query = query.where(
                 (self.model.username.ilike(search_term)) |
                 (self.model.email.ilike(search_term)) |
                 (self.model.full_name.ilike(search_term))
             )
 
-        # 4. 计算符合条件的总记录数 (用于分页)
-        # 注意：这里的 count 查询也必须包含与上面完全相同的 JOIN 和 WHERE 条件
-        count_stmt = select(func.count(self.model.id)).select_from(stmt.subquery())
-        total_result = await self.db.execute(count_stmt)
+        # --- 执行计数查询 (第一步) ---
+        # 在应用了所有过滤和JOIN之后，但在应用分页和排序之前，进行计数
+        # 使用 subquery 来确保 count 的正确性
+        count_query = select(func.count()).select_from(query.subquery())
+        total_result = await self.db.execute(count_query)
         total = total_result.scalar_one()
 
-        # 5. 应用排序和分页
-        stmt = self.apply_ordering(stmt, order_by)  # 复用 BaseRepository 的排序逻辑
-        stmt = stmt.offset((page - 1) * per_page).limit(per_page)
+        if total == 0:
+            return PageResponse(items=[], total=0, page=page, per_page=per_page, total_pages=0)
 
-        # 6. 执行查询并获取数据
-        items_result = await self.db.execute(stmt)
-        items = items_result.scalars().unique().all()
+        # --- 获取分页后的用户ID (第二步) ---
+        # 选择主键ID，应用排序和分页
+        paginated_ids_query = query.with_only_columns(self.model.id)
+        paginated_ids_query = self.apply_ordering(paginated_ids_query, order_by)
+        paginated_ids_query = paginated_ids_query.offset((page - 1) * per_page).limit(per_page)
 
-        return PageResponse(
-            items=items,  # 使用包含角色的 Pydantic 模型
+        paginated_ids_result = await self.db.execute(paginated_ids_query)
+        user_ids_for_page = paginated_ids_result.scalars().all()
+
+        if not user_ids_for_page:
+            return PageResponse(items=[], total=total, page=page, per_page=per_page,
+                                total_pages=ceil(total / per_page) if per_page > 0 else 0)
+
+        # --- 获取完整的用户数据 (第三步) ---
+        # 使用上面获取的ID列表来查询完整的用户对象，并预加载角色
+        # 保持原始排序是很重要的
+        final_query = (
+            select(self.model)
+            .where(self.model.id.in_(user_ids_for_page))
+            .options(selectinload(self.model.roles))
+        )
+        # 重新应用排序，以保证最终结果的顺序与分页ID的顺序一致
+        final_query = self.apply_ordering(final_query, order_by)
+
+        items_result = await self.db.execute(final_query)
+        # 使用 .unique() 来确保即使JOIN导致了重复行，也只返回唯一的ORM对象
+        items = items_result.unique().scalars().all()
+
+        return PageResponse[UserReadWithRoles](
+            items=items,
             total=total,
             page=page,
             total_pages=ceil(total / per_page) if per_page > 0 else 0,
