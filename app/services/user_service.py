@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import UUID
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -66,23 +66,57 @@ class UserService(BaseService):
     # --- 用户列表 ---
 
     async def page_list_users(
-        self,
-        page: int = 1,
-        per_page: int = 10,
-        order_by: str = "created_at:desc",
-        # --- ⬇️ 在这里同步修改参数 ⬇️ ---
-        username: Optional[str] = None,
-        email: Optional[str] = None,
-        phone: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        role_ids: Optional[List[UUID]] = None,
+            self,
+            page: int = 1,
+            per_page: int = 10,
+            sort_by: Optional[List[str]] = None,
+            filters: Optional[Dict[str, Any]] = None,
     ) -> PageResponse[UserReadWithRoles]:
-        """获取用户分页列表，封装了复杂的查询逻辑。"""
-        return await self.user_repo.get_paged_users(
-            page=page, per_page=per_page, order_by=order_by,
-            # --- ⬇️ 在这里把新参数传递下去 ⬇️ ---
-            username=username, email=email, phone=phone,
-            is_active=is_active, role_ids=role_ids
+        """
+        获取用户分页列表 (动态查询最终版)。
+        """
+        # 1. 准备传递给 repo 层的过滤器字典
+        repo_filters = filters or {}
+
+        # 2. 转换查询条件：将前端友好的查询转为后端Repo能理解的指令
+        #    例如，将 "username=admin" 转换为 "username__ilike=%admin%"
+        for field in ['username', 'email', 'phone', 'full_name']:
+            if field in repo_filters and repo_filters[field]:
+                # 从原始字典中弹出该值，并添加带操作符的新键值对
+                value = repo_filters.pop(field)
+                repo_filters[f'{field}__ilike'] = f"%{value}%"
+
+        # 对于关联字段，我们约定使用 `__in`
+        if 'role_ids' in repo_filters and repo_filters['role_ids']:
+            value = repo_filters.pop('role_ids')
+            repo_filters['role_ids__in'] = value
+
+        # 3. 调用现在非常简洁的 repo 方法
+        paged_users_orm = await self.user_repo.get_paged_users(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            filters=repo_filters,
+        )
+
+        # 4. 将 ORM 结果转换为 Pydantic Schema
+        items_with_permissions = []
+        for user in paged_users_orm.items:
+            user_dto = UserReadWithRoles.model_validate(user)
+            # 计算并填充用户的总权限集合 (这是一个很好的优化)
+            all_permissions = set()
+            for role in user.roles:
+                for perm in role.permissions:
+                    all_permissions.add(perm.code)
+            user_dto.permissions = all_permissions
+            items_with_permissions.append(user_dto)
+
+        return PageResponse(
+            items=items_with_permissions,
+            page=paged_users_orm.page,
+            per_page=paged_users_orm.per_page,
+            total=paged_users_orm.total,
+            total_pages=paged_users_orm.total_pages
         )
 
     # --- 用户操作 ---
