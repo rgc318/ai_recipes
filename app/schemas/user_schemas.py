@@ -125,3 +125,17 @@ class PrivateUser(BaseModel):
             return False
         lockout_expires_at = self.locked_at + timedelta(hours=settings.SECURITY_USER_LOCKOUT_TIME)
         return lockout_expires_at > datetime.now(UTC)
+
+class UserFilterParams(BaseModel):
+    """
+    用户动态查询的过滤参数模型。
+    前端可以根据需要传递任意组合。
+    """
+    username: Optional[str] = Field(None, description="按用户名模糊搜索")
+    email: Optional[str] = Field(None, description="按邮箱模糊搜索")
+    phone: Optional[str] = Field(None, description="按手机号模糊搜索")
+    full_name: Optional[str] = Field(None, description="按全名模糊搜索") # 示例：轻松添加新字段
+    is_active: Optional[bool] = Field(None, description="按激活状态过滤")
+    is_superuser: Optional[bool] = Field(None, description="按是否为超级用户过滤")
+    is_locked: Optional[bool] = Field(None, description="按是否锁定过滤")
+    role_ids: Optional[List[UUID]] = Field(None, description="根据关联的角色ID列表过滤")

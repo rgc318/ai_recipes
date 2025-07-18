@@ -12,8 +12,8 @@ from app.schemas.role_schemas import RoleRead
 # ==========================
 # 💡 通用类型定义
 # ==========================
-class PageResponse(BaseModel, Generic[ModelType]):
-    items: List[ModelType]
+class PageResponse(BaseModel, Generic[T]):
+    items: List[T]
     total: int
     page: int
     total_pages: int

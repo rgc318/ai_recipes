@@ -9,7 +9,8 @@ from app.db.session import get_session
 from app.schemas.user_context import UserContext
 from app.services.user_service import UserService
 from app.api.dependencies.services import get_user_service
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
+    UserFilterParams
 from app.schemas.page_schemas import PageResponse
 from app.core.api_response import response_success, response_error, StandardResponse
 from app.core.response_codes import ResponseCodeEnum
@@ -77,31 +78,44 @@ async def update_my_profile(
 @router.get(
     "/",
     response_model=StandardResponse[PageResponse[UserReadWithRoles]],
-    summary="获取用户列表（带分页和筛选）"
+    summary="动态分页、排序和过滤用户列表"
 )
-async def list_users(
-    service: UserService = Depends(get_user_service),
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=100, description="每页数量", alias="pageSize"),
-    order_by: str = Query("created_at:desc", description="排序字段"),
-    username: Optional[str] = Query(None, description="按用户名模糊搜索"),
-    email: Optional[str] = Query(None, description="按邮箱模糊搜索"),
-    phone: Optional[str] = Query(None, description="按电话模糊搜索"),
-    is_active: Optional[bool] = Query(None, description="按用户是否激活状态筛选"),
-    role_ids: Optional[List[UUID]] = Query(None, description="按角色ID列表筛选用户")
+async def list_users_paginated(
+        service: UserService = Depends(get_user_service),
+        page: int = Query(1, ge=1, description="页码"),
+        # 保持与后端 service/repo 一致的命名
+        per_page: int = Query(10, ge=1, le=100, description="每页数量"),
+        # 2. 排序参数现在是一个简单的字符串，由前端按约定格式提供
+        sort: Optional[str] = Query(
+            None,
+            description="排序字段，逗号分隔，-号表示降序。例如: -created_at,username",
+            examples=["-created_at,username"]
+        ),
+        # 3. 使用 Depends 将所有过滤参数自动注入到 filter_params 对象中
+        filter_params: UserFilterParams = Depends()
 ):
     """
-    获取用户列表，支持分页和筛选。
-    FastAPI会根据response_model自动将ORM对象转换为Pydantic模型。
+    获取用户的分页列表，支持动态过滤和排序。
+
+    - **排序**: `?sort=-created_at,username`
+    - **过滤**: `?username=admin&is_active=true&role_ids=uuid1&role_ids=uuid2`
     """
-    # 直接从service层获取包含ORM对象的响应
+    # 4. 在 Router 层进行简单的数据格式转换
+    # 将逗号分隔的字符串转为列表，如果存在的话
+    sort_by = sort.split(',') if sort else None
+
+    # 将 Pydantic 模型转为字典，只包含前端实际传入的参数
+    # 这是最关键的一步，确保了只有用户请求的过滤器才会被传递
+    filters = filter_params.model_dump(exclude_unset=True)
+
+    # 5. 使用新的、简洁的接口调用 Service
     page_data = await service.page_list_users(
-        page=page, per_page=page_size, order_by=order_by,
-        username=username, email=email, phone=phone,
-        is_active=is_active, role_ids=role_ids
+        page=page,
+        per_page=per_page,
+        sort_by=sort_by,
+        filters=filters
     )
 
-    # 直接将它作为数据返回，FastAPI会处理剩下的一切
     return response_success(data=page_data, message="获取用户列表成功")
 
 # === Create User ===
