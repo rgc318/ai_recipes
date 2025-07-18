@@ -123,24 +123,56 @@ class UserService(BaseService):
 
     async def create_user(self, user_in: UserCreate) -> User:
         """创建新用户，并进行唯一性检查。"""
+        # 1. 分离 role_ids 和其他用户数据
+        role_ids = user_in.role_ids
+        # 推荐使用 model_dump (Pydantic v2)
+        user_data_dict = user_in.model_dump(exclude={"password", "role_ids"})
         if await self.user_repo.get_by_username(user_in.username):
             raise AlreadyExistsException("用户名已存在")
 
         if user_in.email and await self.user_repo.get_by_email(user_in.email):
             raise AlreadyExistsException("邮箱已被注册")
 
+        if user_in.phone and await self.user_repo.get_by_phone(user_in.phone):
+            raise AlreadyExistsException("电话号码已被注册")
+
         hashed_password = get_password_hash(user_in.password)
-        # 推荐使用 model_dump (Pydantic v2)
-        user_data = user_in.model_dump(exclude={"password"})
-        user_data["hashed_password"] = hashed_password
+
+
+        user_data_dict["hashed_password"] = hashed_password
 
         try:
-            # 3. 调用不带commit的repo.create方法
-            new_user = await self.user_repo.create(user_data)
-            # 4. 在Service层决定提交事务
+            # 【核心修改】在这里调整对象创建流程
+
+            # 1. 在内存中创建 User 对象实例，此时它是一个“瞬态对象”
+            new_user = User(**user_data_dict)
+
+            # 2. 如果传入了 role_ids，则处理角色关联
+            if role_ids:
+                unique_role_ids = list(set(role_ids))
+                if unique_role_ids:
+                    roles = await self.role_repo.get_by_ids(unique_role_ids)
+                    if len(roles) != len(unique_role_ids):
+                        raise NotFoundException("一个或多个指定的角色不存在")
+
+                    # 3. 将 Role 对象列表直接赋值给“瞬态对象”的 roles 属性
+                    #    因为 new_user 还未加入 session，所以这里只是简单的 Python 列表赋值，
+                    #    不会触发任何数据库懒加载。
+                    new_user.roles = roles
+
+            # 4. 将已经完全构造好的 new_user 对象添加到数据库会话中
+            self.user_repo.db.add(new_user)
+            await self.user_repo.flush()  # 将变更刷入数据库
+
+            # 5. 所有操作成功，提交整个事务
             await self.user_repo.commit()
+
+            # 6. 刷新 new_user 对象以获取最新的数据库状态（如DB默认值、触发器生成的值等）
+            await self.user_repo.refresh(new_user)
+
             return new_user
         except Exception as e:
+            # 发生任何错误，回滚事务
             await self.user_repo.rollback()
             raise e
 
