@@ -92,7 +92,10 @@ async def list_users_paginated(
             examples=["-created_at,username"]
         ),
         # 3. 使用 Depends 将所有过滤参数自动注入到 filter_params 对象中
-        filter_params: UserFilterParams = Depends()
+        filter_params: UserFilterParams = Depends(),
+
+        role_ids: Optional[List[UUID]] = Query(None, description="根据关联的角色ID列表过滤")
+
 ):
     """
     获取用户的分页列表，支持动态过滤和排序。
@@ -107,7 +110,8 @@ async def list_users_paginated(
     # 将 Pydantic 模型转为字典，只包含前端实际传入的参数
     # 这是最关键的一步，确保了只有用户请求的过滤器才会被传递
     filters = filter_params.model_dump(exclude_unset=True)
-
+    if role_ids:
+        filters['role_ids'] = role_ids
     # 5. 使用新的、简洁的接口调用 Service
     page_data = await service.page_list_users(
         page=page,
