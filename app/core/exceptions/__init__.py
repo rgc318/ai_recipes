@@ -5,6 +5,7 @@ from .base_exception import (
     NotFoundException,
     AlreadyExistsException,
     ConcurrencyConflictException,
+    FileException,
 )
 from .user_exceptions import (
     UserAlreadyExistsException,
@@ -34,6 +35,7 @@ __all__ = [
     "NotFoundException",
     "AlreadyExistsException",
     "ConcurrencyConflictException",
+    "FileException",
 
     "UserAlreadyExistsException",
     "UserNotFoundException",

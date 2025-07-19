@@ -8,6 +8,7 @@ class MinIOConfig(BaseModel):
     secret_key: str
     bucket_name: str
     cdn_base_url: str = ""
+    out_cdn_base_url: str = ""
     cdn_prefix_mapping: Dict[str, str] =  {}  # 确保这里是 Dict 类型
     secure: bool = False
     costume_url: bool = False
