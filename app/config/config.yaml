@@ -7,18 +7,18 @@ server:
 database:
   url: "postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
-minio:
-  endpoint: "192.168.31.229:19000"              # MinIO 服务的地址和端口
-  access_key: "${MINIO_ACCESS_KEY}"             # 从环境变量中读取 MinIO 的 Access Key
-  secret_key: "${MINIO_SECRET}"                 # 从环境变量中读取 MinIO 的 Secret Key
-  bucket_name: "ai-recipes"                     # 目标存储桶
-  secure: false                                 # 是否使用 https，默认为 false（MinIO 不使用 https 时）
-  costume_url: true                                 # 是否使用 自定义url
-#  cdn_base_url: "http://192.168.31.229:19000"        # 公网 CDN 地址，用于生成文件的访问 URL
-  out_cdn_base_url: "http://192.168.31.229:19000"        # 公网 CDN 地址，用于生成文件的访问 URL
-#  cdn_prefix_mapping:
-#    "/user-avatars": "https://cdn.example.com/user-avatars"
-#    "/recipe-images": "https://cdn.example.com/recipe-images"
+#minio:
+#  endpoint: "192.168.31.229:19000"              # MinIO 服务的地址和端口
+#  access_key: "${MINIO_ACCESS_KEY}"             # 从环境变量中读取 MinIO 的 Access Key
+#  secret_key: "${MINIO_SECRET}"                 # 从环境变量中读取 MinIO 的 Secret Key
+#  bucket_name: "ai-recipes"                     # 目标存储桶
+#  secure: false                                 # 是否使用 https，默认为 false（MinIO 不使用 https 时）
+#  costume_url: true                                 # 是否使用 自定义url
+##  cdn_base_url: "http://192.168.31.229:19000"        # 公网 CDN 地址，用于生成文件的访问 URL
+#  public_endpoint: "http://192.168.31.229:19000"        # 公网 CDN 地址，用于生成文件的访问 URL
+##  cdn_prefix_mapping:
+##    "/user-avatars": "https://cdn.example.com/user-avatars"
+##    "/recipe-images": "https://cdn.example.com/recipe-images"
 
 logging:
   enable_file: true
@@ -46,3 +46,83 @@ redis:
   socket_timeout: 5
   socket_connect_timeout: 5
   serializer: "json"
+
+
+# 【修改二】新增 storage_clients 部分，定义所有可用的存储连接
+storage_clients:
+  private_minio:
+    type: "minio"
+    params:
+      endpoint: "192.168.31.229:19000"  # 您的私有 MinIO 地址
+      access_key: "${MINIO_ACCESS_KEY}"
+      secret_key: "${MINIO_SECRET}"
+      bucket_name: "secure-files-bucket" # 用于敏感文件的存储桶
+      secure: false
+
+  # 示例：一个模拟的、用于存放公共文件的“云存储”
+  # 注意：这里我们仍然用 minio 的配置来模拟，未来可以换成真正的 S3 配置
+  public_cloud_storage:
+    type: "minio" # 将来可以是 's3', 'oss' 等
+    params:
+      endpoint: "192.168.31.229:19000"
+      access_key: "${MINIO_ACCESS_KEY}"
+      secret_key: "${MINIO_SECRET}"
+      bucket_name: "public-assets-bucket" # 用于存放头像等公共文件的存储桶
+      secure: false
+      # 可以在这里为特定的 client 定义 cdn_base_url
+#      cdn_base_url: "http://cdn.your-domain.com" # 假设公共文件走 CDN
+      public_endpoint: "192.168.31.229:19000" # 假设公共文件走 CDN
+
+
+# 【修改三】新增 storage_profiles 部分，定义业务场景及其使用的存储客户端
+storage_profiles:
+  user_avatars:
+    client: "public_cloud_storage"
+    default_folder: "avatars/{user_id}"
+    # 【修改】现在这是一个真正的 MIME 类型列表
+    allowed_file_types:
+      - "image/jpeg"
+      - "image/png"
+      - "image/webp"
+
+  secure_reports:
+    client: "private_minio"
+    default_folder: "secure/reports/{year}"
+    allowed_file_types:
+      - "application/pdf"
+      - "application/zip"
+      - "application/vnd.openxmlformats-officedocument.wordprocessingml.document" # .docx
+      - "application/vnd.ms-excel" # .xls
+      - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" # .xlsx
+
+  # 【新增】一个通用的文件上传 Profile，包含各种主流文件类型
+  general_files:
+    client: "private_minio" # 假设通用文件默认存放在私有存储中
+    default_folder: "general/{year}/{month}"
+    allowed_file_types:
+      # 图片 (Images)
+      - "image/jpeg"
+      - "image/png"
+      - "image/gif"
+      - "image/webp"
+      - "image/svg+xml"
+      # 文档 (Documents)
+      - "application/pdf"
+      - "text/plain"
+      - "text/csv"
+      - "application/msword" # .doc
+      - "application/vnd.openxmlformats-officedocument.wordprocessingml.document" # .docx
+      - "application/vnd.ms-excel" # .xls
+      - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" # .xlsx
+      - "application/vnd.ms-powerpoint" # .ppt
+      - "application/vnd.openxmlformats-officedocument.presentationml.presentation" # .pptx
+      # 压缩包 (Archives)
+      - "application/zip"
+      - "application/x-rar-compressed"
+      - "application/x-7z-compressed"
+      # 音频 (Audio)
+      - "audio/mpeg" # .mp3
+      - "audio/wav"
+      # 视频 (Video)
+      - "video/mp4"
+      - "video/quicktime" # .mov

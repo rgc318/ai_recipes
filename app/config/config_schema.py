@@ -1,17 +1,30 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal, Union, List
 
 from pydantic import BaseModel, Field
 
-class MinIOConfig(BaseModel):
-    endpoint: str
+class MinioS3Params(BaseModel):
+    """MinIO 或 AWS S3 类型的客户端参数"""
+    endpoint: Optional[str] = None # S3 不需要 endpoint，MinIO 需要
     access_key: str
     secret_key: str
     bucket_name: str
-    cdn_base_url: str = ""
-    out_cdn_base_url: str = ""
-    cdn_prefix_mapping: Dict[str, str] =  {}  # 确保这里是 Dict 类型
-    secure: bool = False
-    costume_url: bool = False
+    secure: bool = True
+    cdn_base_url: Optional[str] = None
+    public_endpoint: Optional[str] = None
+
+class AzureBlobParams(BaseModel):
+    """Azure Blob Storage 类型的客户端参数 (示例)"""
+    connection_string: str
+    bucket_name: str # 在 Azure 中叫 container_name
+    cdn_base_url: Optional[str] = None
+
+class MinioClientConfig(BaseModel):
+    type: Literal['minio', 's3'] # 限制 type 只能是 'minio' 或 's3'
+    params: MinioS3Params
+
+class AzureClientConfig(BaseModel):
+    type: Literal['azure_blob']
+    params: AzureBlobParams
 
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
@@ -54,11 +67,28 @@ class RedisConfig(BaseModel):
         auth_part = f":{self.password}@" if self.password else ""
         return f"redis://{auth_part}{self.host}:{self.port}/{self.db}"
 
+class StorageProfileConfig(BaseModel):
+    """单个存储策略的配置"""
+    client: str = Field(..., description="该策略使用的客户端名称")
+    default_folder: str = Field(..., description="默认存储的文件夹")
+    allowed_file_types: List[str] = Field(..., description="允许上传的MIME类型列表, e.g., ['image/jpeg', 'image/png']")
 
+
+# ========================================================================================
+#
+#   所有配置模型都要写在APPconfig上方
+#
+# ========================================================================================
 class AppConfig(BaseModel):
     server: ServerConfig
     database: DatabaseConfig
-    minio: MinIOConfig
     logging: LoggingConfig
     security_settings: SecuritySettings
     redis: RedisConfig
+    # 【新增】将新的配置结构添加到主配置模型中
+    # 使用 Union 来支持多种不同的客户端配置结构
+    storage_clients: Dict[str, Union[MinioClientConfig, AzureClientConfig]]
+    storage_profiles: Dict[str, StorageProfileConfig]
+
+
+
