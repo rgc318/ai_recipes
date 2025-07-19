@@ -1,142 +1,123 @@
-from fastapi import APIRouter, UploadFile, Form, File, Query, HTTPException, Depends
-from typing import Optional
-from app.services import minio_service
-from app.core.api_response import response_success, response_error
-from app.core.response_codes import ResponseCodeEnum
-from app.core.logger import logger
-from pydantic import BaseModel
+from fastapi import APIRouter, UploadFile, Form, File, Query, Depends, Body
+from typing import List, Optional
+
+# 导入依赖注入函数和新的 Schema
+from app.api.dependencies.services import get_minio_service
+from app.services.minio_service import MinioService
+from app.schemas.minio_schemas import (
+    FileUploadResponse,
+    FileExistsResponse,
+    FileListResponse,
+    PresignedGetUrlResponse,
+    PresignedPutUrlResponse,
+)
+from app.core.api_response import StandardResponse, response_success
 
 router = APIRouter()
 
-
-class FileResponse(BaseModel):
-    url: str
-    key: str
-    content_type: str
-    filename: Optional[str] = None
-
-
-class FileExistsResponse(BaseModel):
-    exists: bool
-
-
-# 上传用户头像
-@router.post("/upload-avatar", response_model=FileResponse)
+@router.post(
+    "/upload/avatar",
+    response_model=StandardResponse[FileUploadResponse],
+    summary="上传用户头像"
+)
 async def upload_avatar(
-    file: UploadFile = File(...),
     user_id: str = Form(..., description="用户ID"),
-):
-    try:
-        result = await minio_service.upload_user_avatar(file, user_id)
-        return response_success(data=result, message="Avatar uploaded successfully")
-    except HTTPException as e:
-        logger.error(f"Failed to upload avatar for user {user_id}: {e.detail}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
-    except Exception as e:
-        logger.error(f"Unexpected error during avatar upload for user {user_id}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during avatar upload")
-
-
-# 上传菜谱图片
-@router.post("/upload-recipe-image", response_model=FileResponse)
-async def upload_recipe_image(
     file: UploadFile = File(...),
-    recipe_id: str = Query(..., description="菜谱ID"),
+    minio_service: MinioService = Depends(get_minio_service),
 ):
-    try:
-        result = await minio_service.upload_recipe_image(file, recipe_id)
-        return response_success(data=result, message="Recipe image uploaded successfully")
-    except HTTPException as e:
-        logger.error(f"Failed to upload recipe image for recipe {recipe_id}: {e.detail}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
-    except Exception as e:
-        logger.error(f"Unexpected error during recipe image upload for recipe {recipe_id}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during recipe image upload")
+    """
+    上传用户头像。服务层会处理文件验证、重命名和并发控制。
+    """
+    # 所有的 try/except 都消失了！Service 层会抛出 FileException，
+    # 由全局异常处理器统一捕获并返回格式化的错误响应。
+    result = await minio_service.upload_user_avatar(file=file, user_id=user_id)
+    return response_success(data=result, message="头像上传成功。")
 
-
-# 通用文件上传
-@router.post("/upload", response_model=FileResponse)
-async def upload_general(
+@router.post(
+    "/upload/file",
+    response_model=StandardResponse[FileUploadResponse],
+    summary="上传通用文件"
+)
+async def upload_general_file(
+    folder: str = Form("general", description="在存储桶内的目标文件夹"),
     file: UploadFile = File(...),
-    folder: str = Query("uploads", description="目标文件夹"),
+    minio_service: MinioService = Depends(get_minio_service),
 ):
-    try:
-        result = await minio_service.upload_general_file(file, folder)
-        return response_success(data=result, message="File uploaded successfully")
-    except HTTPException as e:
-        logger.error(f"Failed to upload file to {folder}: {e.detail}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
-    except Exception as e:
-        logger.error(f"Unexpected error during general file upload to {folder}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during file upload")
+    """上传一个通用文件到指定的文件夹。"""
+    result = await minio_service.upload_file(file=file, folder=folder, file_type="file")
+    return response_success(data=result, message="文件上传成功。")
 
-
-# 删除文件
-@router.delete("/delete")
-async def delete_file(
-    key: str = Query(..., description="文件 key 路径，如 user-avatars/xxx.png"),
+@router.delete(
+    "/files",
+    status_code=204,
+    summary="删除一个或多个文件"
+)
+async def delete_files(
+    object_names: List[str] = Body(..., description="需要删除的文件对象名称（key）列表。", embed=True),
+    minio_service: MinioService = Depends(get_minio_service),
 ):
-    try:
-        await minio_service.delete_file(key)
-        return response_success(message=f"File {key} deleted successfully")
-    except HTTPException as e:
-        logger.error(f"Failed to delete file {key}: {e.detail}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message=e.detail)
-    except Exception as e:
-        logger.error(f"Unexpected error during file deletion for {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Unexpected error during file deletion")
+    """根据文件对象名称（key）从存储中删除一个或多个文件。"""
+    await minio_service.delete_files(object_names=object_names)
+    # 成功时，FastAPI 会自动发送 204 No Content 响应。
 
-
-# 文件是否存在
-@router.get("/exists", response_model=FileExistsResponse)
-async def file_exists(
-    key: str = Query(..., description="文件 key 路径"),
+@router.get(
+    "/files/exists",
+    response_model=StandardResponse[FileExistsResponse],
+    summary="检查文件是否存在"
+)
+async def check_file_exists(
+    object_name: str = Query(..., description="需要检查的文件对象名称（key）。"),
+    minio_service: MinioService = Depends(get_minio_service),
 ):
-    try:
-        exists = await minio_service.file_exists(key)
-        return response_success(data=FileExistsResponse(exists=exists))
-    except Exception as e:
-        logger.error(f"Failed to check existence of file {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to check file existence")
+    """根据文件对象名称（key）检查文件是否存在。"""
+    exists = await minio_service.file_exists(object_name=object_name)
+    return response_success(data={"exists": exists})
 
+@router.get(
+    "/presigned-url/get",
+    response_model=StandardResponse[PresignedGetUrlResponse],
+    summary="生成用于下载文件的预签名 URL"
+)
+async def get_presigned_download_url(
+    object_name: str = Query(..., description="文件的对象名称（key）。"),
+    expires_in: int = Query(3600, description="URL 有效期（秒）。"),
+    minio_service: MinioService = Depends(get_minio_service),
+):
+    """为一个私有对象生成临时的、安全的文件下载 URL。"""
+    url = await minio_service.generate_presigned_get_url(object_name=object_name, expires_in=expires_in)
+    return response_success(data={"url": url})
 
-# 列出文件
-@router.get("/list")
+@router.post(
+    "/presigned-url/put",
+    response_model=StandardResponse[PresignedPutUrlResponse],
+    summary="生成用于上传文件的预签名 URL"
+)
+async def get_presigned_upload_url(
+    folder: str = Body("uploads", description="上传的目标文件夹。"),
+    original_filename: str = Body(..., description="待上传文件的原始名称。"),
+    expires_in: int = Body(3600, description="URL 有效期（秒）。"),
+    minio_service: MinioService = Depends(get_minio_service),
+):
+    """
+    为客户端直接上传文件，请求一个安全的、临时的 URL。
+    服务层会生成唯一的对象名称以防止文件被覆盖。
+    """
+    result = await minio_service.generate_presigned_put_url(
+        folder=folder,
+        original_filename=original_filename,
+        expires_in=expires_in
+    )
+    return response_success(data=result)
+
+@router.get(
+    "/files",
+    response_model=StandardResponse[FileListResponse],
+    summary="列出文件"
+)
 async def list_files(
-    prefix: str = Query("", description="前缀过滤，如 user-avatars/"),
+    prefix: str = Query("", description="按对象名称前缀筛选，例如 'avatars/user_id/'"),
+    minio_service: MinioService = Depends(get_minio_service),
 ):
-    try:
-        files = await minio_service.list_files(prefix)
-        return response_success(data={"files": files})
-    except Exception as e:
-        logger.error(f"Failed to list files with prefix {prefix}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to list files")
-
-
-# 生成预签名下载URL
-@router.get("/generate-download-url")
-async def generate_download_url(
-    key: str = Query(..., description="文件 key 路径"),
-    expires_in: int = Query(3600, description="过期时间(秒)"),
-    use_cdn: bool = Query(True, description="是否使用 CDN URL"),
-):
-    try:
-        url = await minio_service.generate_file_url(key, expires_in=expires_in, use_cdn=use_cdn)
-        return response_success(data={"download_url": url})
-    except Exception as e:
-        logger.error(f"Failed to generate download URL for {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to generate download URL")
-
-
-# 生成预签名上传URL
-@router.get("/generate-upload-url")
-async def generate_upload_url(
-    key: str = Query(..., description="目标文件 key 路径"),
-    expires_in: int = Query(3600, description="过期时间(秒)"),
-):
-    try:
-        url = await minio_service.generate_upload_url(key, expires_in=expires_in)
-        return response_success(data={"upload_url": url})
-    except Exception as e:
-        logger.error(f"Failed to generate upload URL for {key}: {str(e)}")
-        return response_error(ResponseCodeEnum.SERVER_ERROR, message="Failed to generate upload URL")
+    """根据前缀列出存储桶中的文件对象。"""
+    files_list = await minio_service.list_files(prefix=prefix)
+    return response_success(data={"files": files_list})

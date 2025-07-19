@@ -8,7 +8,7 @@ from app.core.response_codes import ResponseCodeEnum
 class BaseBusinessException(Exception):
     def __init__(
             self,
-            code_enum: ResponseCodeEnum,
+            code_enum: Optional[ResponseCodeEnum] = None,
             code: Optional[int] = None,
             status_code: int = 200,
             message: Optional[str] = None,
@@ -48,7 +48,13 @@ class AlreadyExistsException(BaseBusinessException):
     def __init__(self, message: str = "资源已存在"):
         super().__init__(ResponseCodeEnum.ALREADY_EXISTS, message=message)
 
-
+class FileException(BaseBusinessException):
+    """
+    当请求的资源在数据库中不存在时抛出。
+    """
+    def __init__(self, message: str = "资源不存在"):
+        # 我们使用刚刚在 ResponseCodeEnum 中定义的 NOT_FOUND
+        super().__init__(ResponseCodeEnum.FILE_EXCEPTION, message=message)
 class ConcurrencyConflictException(BaseBusinessException):
     def __init__(self, message: str = "操作失败，数据已被他人修改，请刷新后重试"):
         super().__init__(ResponseCodeEnum.ALREADY_EXISTS, message=message)

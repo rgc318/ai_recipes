@@ -32,6 +32,11 @@ class ResponseCodeEnum(Enum):
     TOKEN_TYPE_MISMATCH = (40107, "Token 类型不匹配")
     LOGOUT_FAILED = (40108, "登出失败")
     TOKEN_REFRESH_FAILED = (40109, "token刷新失败")
+
+    # === minio相关 ===
+    FILE_EXCEPTION = (402001, "用户已存在")
+    UNSUPPORTED_FILE_TYPE = (40202, "用户已存在")
+    FILE_SIZE_EXCEEDED = (40203, "用户不存在")
     def __init__(self, code: int, message: str):
         self._code = code
         self._message = message
