@@ -70,7 +70,7 @@ storage_clients:
       bucket_name: "public-assets-bucket" # 用于存放头像等公共文件的存储桶
       secure: false
       # 可以在这里为特定的 client 定义 cdn_base_url
-#      cdn_base_url: "http://cdn.your-domain.com" # 假设公共文件走 CDN
+#      cdn_base_url: "cdn.your-domain.com" # 假设公共文件走 CDN
       public_endpoint: "192.168.31.229:19000" # 假设公共文件走 CDN
 
 
