@@ -1,8 +1,9 @@
 # app/deps/services.py （或 app/services/dependencies.py）
 from fastapi import Depends
 
-from app.core.minio_client import minio_client
-from app.services.minio_service import MinioService
+
+from app.core.storage.storage_factory import storage_factory
+from app.services.file_service import FileService
 from app.services.permission_service import PermissionService
 from app.services.role_service import RoleService
 from app.services.user_service import UserService
@@ -35,7 +36,7 @@ def get_permission_service(
 ) -> PermissionService:
     return PermissionService(repo_factory)
 
-minio_service_instance = MinioService(minio_client=minio_client)
-def get_minio_service() -> MinioService:
+file_service_instance = FileService(factory=storage_factory)
+def get_file_service() -> FileService:
     """MinioService 的依赖注入函数。"""
-    return minio_service_instance
+    return file_service_instance
