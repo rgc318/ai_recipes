@@ -1,6 +1,7 @@
 import asyncio
 import os
 from asyncio import Semaphore
+from datetime import datetime
 from typing import BinaryIO, List, Literal
 from uuid import uuid4
 
@@ -138,8 +139,20 @@ class FileService:
         client = self.factory.get_client_by_profile(profile_name)
         profile_config = self.factory.get_profile_config(profile_name)
 
+        # ==================================================================
+        # 【新增逻辑】在这里自动生成默认参数
+        # ==================================================================
+        now = datetime.now()
+        default_params = {
+            "year": now.year,
+            "month": now.month,
+            "day": now.day
+            # 未来还可以添加 "user_id" 等，如果能从上下文中获取
+        }
+        final_params = {**default_params, **path_params}
+
         try:
-            folder = profile_config.default_folder.format(**path_params)
+            folder = profile_config.default_folder.format(**final_params)
         except KeyError as e:
             raise ValueError(f"Missing required path parameter '{e.args[0]}' for profile '{profile_name}'")
 

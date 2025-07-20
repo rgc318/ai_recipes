@@ -58,7 +58,7 @@ async def upload_user_avatar(
     summary="按业务场景上传文件 (通用)"
 )
 async def upload_by_profile(
-    profile_name: str = Form(..., description="在配置中定义的 Profile 名称, e.g., 'secure_reports'"),
+    profile_name: str = Form(default="general_files", description="在配置中定义的 Profile 名称, e.g., 'secure_reports'"),
     path_params_json: str = Form("{}", description="用于格式化路径的动态参数 (JSON 字符串), e.g., '{\"tenant_id\": \"abc\"}'"),
     file: UploadFile = File(...),
     file_service: FileService = Depends(get_file_service),
