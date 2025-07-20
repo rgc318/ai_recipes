@@ -97,7 +97,7 @@ storage_profiles:
 
   # 【新增】一个通用的文件上传 Profile，包含各种主流文件类型
   general_files:
-    client: "private_minio" # 假设通用文件默认存放在私有存储中
+    client: "public_cloud_storage" # 假设通用文件默认存放在私有存储中
     default_folder: "general/{year}/{month}"
     allowed_file_types:
       # 图片 (Images)
