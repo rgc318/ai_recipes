@@ -2,22 +2,25 @@ from datetime import datetime, timezone
 from uuid import UUID
 from typing import List, Optional, Dict, Any
 
+from fastapi import Depends, UploadFile
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import settings
 from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException, \
     ConcurrencyConflictException, UnauthorizedException
+from app.db.crud.file_record_repo import FileRecordRepository
 from app.db.repository_factory_auto import RepositoryFactory
 from app.models.user import User, Role
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile
+from app.schemas.file_record_schemas import FileRecordCreate
+from app.schemas.file_schemas import AvatarLinkDTO
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile, UserRead
 from app.core.security.password_utils import get_password_hash, verify_password
 from app.db.crud.user_repo import UserRepository
 from app.db.crud.role_repo import RoleRepository
 from app.db.crud.base_repo import PageResponse
 from app.services._base_service import BaseService
-
-
-
+from app.services.file_record_service import FileRecordService
+from app.services.file_service import FileService
 
 
 class UserService(BaseService):
@@ -26,20 +29,40 @@ class UserService(BaseService):
     负责处理所有与用户、角色、权限相关的核心业务逻辑。
     """
 
-    def __init__(self, repo_factory: RepositoryFactory):
+    def __init__(
+            self,
+            repo_factory: RepositoryFactory,
+            file_service: FileService = Depends(),
+            file_record_service: FileRecordService = Depends(),
+    ):
         super().__init__()
         self.factory = repo_factory
+        self.file_service = file_service
+        self.file_record_service = file_record_service
         # 假设你的工厂通过类型获取 repo
         self.user_repo: UserRepository = repo_factory.get_repo_by_type(UserRepository)
         self.role_repo: RoleRepository = repo_factory.get_repo_by_type(RoleRepository)
 
     # --- 基础用户查询 ---
 
+    # --- 【新增】辅助方法：动态填充 URL ---
+    def _set_full_avatar_url(self, user_orm: User) -> User:
+        """
+        为一个 User ORM 对象实例丰富动态数据，如 avatar_url。
+        注意：这个方法直接修改并返回传入的 ORM 对象。
+        """
+        if user_orm.avatar_url:  # 如果用户有关联的头像 object_name
+            client = self.file_service.factory.get_client_by_profile("user_avatars")
+            # 直接在 ORM 对象实例上附加一个新属性
+            user_orm.avatar_url = client.build_final_url(user_orm.avatar_url)
+        return user_orm
+
     async def get_user_by_id(self, user_id: UUID) -> User:
         """根据ID获取用户，未找到则抛出业务异常。"""
         user = await self.user_repo.get_by_id(user_id)
         if not user:
             raise UserNotFoundException()
+        # return self._set_full_avatar_url(user)
         return user
 
     async def get_user_by_username(self, username: str) -> User:
@@ -47,6 +70,7 @@ class UserService(BaseService):
         user = await self.user_repo.get_by_username(username)
         if not user:
             raise UserNotFoundException()
+        # return self._set_full_avatar_url(user)
         return user
 
     async def get_user_by_email(self, email: str) -> User:
@@ -54,6 +78,7 @@ class UserService(BaseService):
         user = await self.user_repo.get_by_email(email)
         if not user:
             raise UserNotFoundException()
+        # return self._set_full_avatar_url(user)
         return user
 
     async def get_user_with_roles(self, user_id: UUID) -> User:
@@ -61,6 +86,7 @@ class UserService(BaseService):
         user = await self.user_repo.get_by_id_with_roles_permissions(user_id)
         if not user:
             raise UserNotFoundException()
+        # return self._set_full_avatar_url(user)
         return user
 
     # --- 用户列表 ---
@@ -102,6 +128,7 @@ class UserService(BaseService):
         # 4. 将 ORM 结果转换为 Pydantic Schema
         items_with_permissions = []
         for user in paged_users_orm.items:
+            # user = self._set_full_avatar_url(user)
             user_dto = UserReadWithRoles.model_validate(user)
             # 计算并填充用户的总权限集合 (这是一个很好的优化)
             all_permissions = set()
@@ -478,3 +505,137 @@ class UserService(BaseService):
         except Exception as e:
             await self.user_repo.rollback()
             raise e
+
+
+    async def update_avatar(self, user_id: UUID, upload_file: UploadFile) -> User:
+        """
+        原子化地更新用户头像。
+
+        此方法执行以下操作：
+        1. 获取用户信息，为删除旧头像做准备。
+        2. 调用 FileService 上传新头像。
+        3. 如果存在旧头像，则删除对象存储中的旧文件和数据库中的旧记录。
+        4. 创建新头像的 FileRecord 记录。
+        5. 更新 User 表中的 avatar_url 字段。
+        6. 所有数据库操作都在一个事务中完成。
+        """
+        # 1. 在事务开始前，先获取当前用户信息
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            raise UserNotFoundException()
+
+        old_avatar_name = user.avatar_url
+
+        # 【关键修改】在这里将 upload_result 初始化为 None
+        upload_result = None
+
+        # --- 开始事务性操作 ---
+        try:
+            # 2. 上传新文件（这个操作在事务之外，因为它不涉及我们自己的数据库）
+            # 您已有的 upload_user_avatar 方法已能胜任
+            upload_result = await self.file_service.upload_user_avatar(
+                file=upload_file,
+                user_id=str(user_id)  # 路径参数
+            )
+
+            # 3. 如果存在旧头像，执行清理
+            if old_avatar_name:
+                # 3.1 删除旧的物理文件
+                await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
+
+                # 3.2 (软)删除旧的 FileRecord
+                # 这里我们通过 repo 直接操作，以便纳入事务控制
+                file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+                await file_record_repo.soft_delete_by_object_name(old_avatar_name)
+
+            # 4. 创建新的 FileRecord
+            file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+            await file_record_repo.create(FileRecordCreate(
+                object_name=upload_result.object_name,
+                original_filename=upload_file.filename,
+                file_size=upload_result.file_size,
+                content_type=upload_result.content_type,
+                uploader_id=user_id,
+                profile_name="user_avatars",
+                etag=upload_result.etag
+            ))
+
+            # 5. 更新 User 对象，并将其加入会话
+            user.avatar_url = upload_result.object_name
+            self.user_repo.db.add(user)  # 将修改后的 user 对象添加到会话中
+
+            # 6. 提交事务！
+            # 所有数据库操作 (删除旧FileRecord, 创建新FileRecord, 更新User) 将被一次性提交
+            await self.user_repo.commit()
+
+        except Exception as e:
+            # 如果任何一步失败，回滚所有数据库操作
+            await self.user_repo.rollback()
+            self.logger.error(f"Failed to update avatar for user {user_id}: {e}")
+            # 这里可以根据情况，尝试删除刚刚上传的新文件，以避免产生孤儿文件
+            if upload_result:
+                await self.file_service.delete_file(upload_result.object_name, profile_name="user_avatars")
+            raise e  # 重新抛出异常，让上层处理
+
+        # 刷新 user 对象以获取最新数据（如 updated_at）并返回
+        await self.user_repo.refresh(user)
+        # 别忘了动态填充完整的 URL
+        # return self._set_full_avatar_url(user)
+        return user
+
+    async def link_new_avatar(self, user_id: UUID, avatar_dto: AvatarLinkDTO) -> User:
+        """
+        原子化地关联一个已通过预签名URL上传的头像。
+        这个方法不处理文件上传，只处理数据库事务。
+        """
+        # 1. 获取用户信息，和之前完全一样
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            raise UserNotFoundException()
+
+        old_avatar_name = user.avatar_url
+
+        # --- 事务性操作 ---
+        try:
+            # 2. 【安全校验】确认文件确实已上传到对象存储
+            # 这是重要的一步，防止客户端伪造请求
+            if not await self.file_service.file_exists(avatar_dto.object_name, profile_name="user_avatars"):
+                raise NotFoundException("指定的上传文件不存在或尚未完成上传。")
+
+            # 3. 如果存在旧头像，执行清理（和之前完全一样）
+            if old_avatar_name:
+                await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
+                file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+                await file_record_repo.soft_delete_by_object_name(old_avatar_name)
+
+            # 4. 创建新的 FileRecord（数据源从UploadFile变为DTO）
+            file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+            await file_record_repo.create(FileRecordCreate(
+                object_name=avatar_dto.object_name,
+                original_filename=avatar_dto.original_filename,
+                file_size=avatar_dto.file_size,
+                content_type=avatar_dto.content_type,
+                uploader_id=user_id,
+                profile_name="user_avatars",
+                etag=avatar_dto.etag
+            ))
+
+            # 5. 更新 User 对象（和之前完全一样）
+            user.avatar_url = avatar_dto.object_name
+            self.user_repo.db.add(user)
+
+            # 6. 提交事务（和之前完全一样）
+            await self.user_repo.commit()
+
+        except Exception as e:
+            # 回滚逻辑也完全一样
+            await self.user_repo.rollback()
+            # 注意：这里我们不需要删除新上传的文件，因为如果关联失败，
+            # 用户可以简单地重试这一步，而无需重新上传。
+            # 如果重试也失败，可以后续通过一个清理任务来处理。
+            raise e
+
+        # 刷新并返回结果（和之前完全一样）
+        await self.user_repo.refresh(user)
+        # return self._set_full_avatar_url(user)
+        return user

@@ -1,14 +1,17 @@
 from types import NoneType
 from typing import Optional, List
 from uuid import UUID
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies.permissions import require_superuser
 from app.core.security.security import get_current_user
 from app.db.session import get_session
+from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO
 from app.schemas.user_context import UserContext
+from app.services.file_service import FileService
 from app.services.user_service import UserService
-from app.api.dependencies.services import get_user_service
+from app.api.dependencies.services import get_user_service, get_file_service
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
     UserFilterParams
 from app.schemas.page_schemas import PageResponse
@@ -60,6 +63,69 @@ async def read_current_user(
     # 直接返回依赖注入的结果即可，无需再调用 service
     return response_success(data=current_user)
 
+
+@router.patch(  # 使用 PATCH 更合适，因为它只更新用户的一个字段
+    "/me/avatar",
+    response_model=StandardResponse[UserRead],  # 返回更新后的完整用户信息
+    summary="更新当前用户的头像"
+)
+async def update_my_avatar(
+        file: UploadFile = File(..., description="新的头像文件"),
+        current_user: UserContext = Depends(get_current_user),
+        user_service: UserService = Depends(get_user_service),
+):
+    """
+    一站式更新当前登录用户的头像。
+    后端将处理文件上传、旧头像清理、数据库更新等所有逻辑。
+    """
+    # 直接调用 Service 层的一个新方法来完成所有工作
+    updated_user = await user_service.update_avatar(
+        user_id=current_user.id,
+        upload_file=file
+    )
+
+    return response_success(data=UserRead.model_validate(updated_user), message="头像更新成功")
+
+@router.post(
+    "/me/avatar/generate-upload-url",
+    response_model=StandardResponse[PresignedUploadURL], # 复用您已有的Schema
+    summary="为上传新头像生成预签名URL"
+)
+async def generate_avatar_upload_url(
+    payload: PresignedAvatarRequest,
+    current_user: UserContext = Depends(get_current_user),
+    file_service: FileService = Depends(get_file_service) # 假设依赖注入函数已存在
+):
+    """
+    第一步：客户端调用此接口获取一个用于直接上传文件的预签名URL。
+    """
+    # 调用您已有的FileService方法来生成URL
+    # 我们将user_id作为路径参数，以保持存储结构的整洁
+    presigned_data = await file_service.generate_presigned_put_url(
+        profile_name="user_avatars",
+        original_filename=payload.original_filename,
+        user_id=str(current_user.id) # 路径参数
+    )
+    return response_success(data=presigned_data)
+
+
+# 【新增】预签名流程的闭环接口
+@router.patch(
+    "/me/avatar/link-uploaded-file",
+    response_model=StandardResponse[UserRead],
+    summary="关联已通过预签名URL上传的头像"
+)
+async def link_uploaded_avatar(
+    payload: AvatarLinkDTO,
+    current_user: UserContext = Depends(get_current_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    """第三步：客户端在文件成功上传到对象存储后，调用此接口完成最终的关联。"""
+    updated_user_dto = await user_service.link_new_avatar(
+        user_id=current_user.id,
+        avatar_dto=payload
+    )
+    return response_success(data=updated_user_dto, message="头像更新成功")
 @router.put("/me", response_model=StandardResponse[UserRead], summary="更新当前用户信息")
 async def update_my_profile(
     updates: UserUpdateProfile, # 使用受限的更新模型
@@ -182,4 +248,24 @@ async def delete_user(user_id: UUID, service: UserService = Depends(get_user_ser
         )
     return response_success(data=None, message="用户已删除")
 
-
+# 【新增】在管理员接口部分添加
+@router.patch(
+    "/{user_id}/avatar",
+    response_model=StandardResponse[UserRead],
+    summary="管理员更新指定用户的头像",
+    dependencies=[Depends(require_superuser)] # <--- 同样需要权限校验
+)
+async def admin_update_user_avatar(
+    user_id: UUID, # 从路径中获取要修改的用户ID
+    file: UploadFile = File(..., description="新的头像文件"),
+    user_service: UserService = Depends(get_user_service),
+):
+    """
+    管理员上传文件，为指定ID的用户更新头像。
+    """
+    # 直接复用现有的Service层方法，只是user_id的来源不同
+    updated_user = await user_service.update_avatar(
+        user_id=user_id,
+        upload_file=file
+    )
+    return response_success(data=updated_user, message="用户头像更新成功")

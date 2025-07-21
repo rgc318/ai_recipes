@@ -2,12 +2,14 @@ from typing import Annotated, Optional, List, Generic, Set
 from uuid import UUID
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_validator, model_validator, computed_field
 from pydantic_core.core_schema import ValidationInfo
 
+from app.config import settings
 from app.core.types.common import ModelType, T
 from app.enums.auth_method import AuthMethod
 from app.schemas.role_schemas import RoleRead
+from app.utils.url_builder import build_public_storage_url
 
 # ==========================
 # 💡 通用类型定义
@@ -75,6 +77,19 @@ class UserRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_login_at: Optional[datetime] = Field(None, description="上次登录时间")
+
+    @computed_field
+    @property
+    def full_avatar_url(self) -> Optional[str]:
+        """
+        动态生成完整的、可公开访问的头像URL。
+        这个字段只在序列化（返回给前端）时存在。
+        """
+        # 它的值来源于同一个实例的 avatar_url (object_name) 字段
+        if self.avatar_url:
+            return build_public_storage_url(self.avatar_url)
+        return None
+
 
     model_config = {
         "from_attributes": True
