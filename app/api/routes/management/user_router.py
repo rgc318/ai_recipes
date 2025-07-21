@@ -121,11 +121,11 @@ async def link_uploaded_avatar(
     user_service: UserService = Depends(get_user_service),
 ):
     """第三步：客户端在文件成功上传到对象存储后，调用此接口完成最终的关联。"""
-    updated_user_dto = await user_service.link_new_avatar(
+    updated_user = await user_service.link_new_avatar(
         user_id=current_user.id,
         avatar_dto=payload
     )
-    return response_success(data=updated_user_dto, message="头像更新成功")
+    return response_success(data=UserRead.model_validate(updated_user), message="头像更新成功")
 @router.put("/me", response_model=StandardResponse[UserRead], summary="更新当前用户信息")
 async def update_my_profile(
     updates: UserUpdateProfile, # 使用受限的更新模型
