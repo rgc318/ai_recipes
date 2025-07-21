@@ -594,12 +594,19 @@ class UserService(BaseService):
             raise UserNotFoundException()
 
         old_avatar_name = user.avatar_url
+        new_avatar_name = avatar_dto.object_name
+
+        if old_avatar_name == new_avatar_name:
+            self.logger.info(f"Avatar for user {user_id} is already set to {new_avatar_name}. No action taken.")
+            # 刷新并返回当前的用户状态
+            await self.user_repo.refresh(user)
+            return user
 
         # --- 事务性操作 ---
         try:
             # 2. 【安全校验】确认文件确实已上传到对象存储
             # 这是重要的一步，防止客户端伪造请求
-            if not await self.file_service.file_exists(avatar_dto.object_name, profile_name="user_avatars"):
+            if not await self.file_service.file_exists(new_avatar_name, profile_name="user_avatars"):
                 raise NotFoundException("指定的上传文件不存在或尚未完成上传。")
 
             # 3. 如果存在旧头像，执行清理（和之前完全一样）
@@ -611,7 +618,7 @@ class UserService(BaseService):
             # 4. 创建新的 FileRecord（数据源从UploadFile变为DTO）
             file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
             await file_record_repo.create(FileRecordCreate(
-                object_name=avatar_dto.object_name,
+                object_name=new_avatar_name,
                 original_filename=avatar_dto.original_filename,
                 file_size=avatar_dto.file_size,
                 content_type=avatar_dto.content_type,
@@ -621,7 +628,7 @@ class UserService(BaseService):
             ))
 
             # 5. 更新 User 对象（和之前完全一样）
-            user.avatar_url = avatar_dto.object_name
+            user.avatar_url = new_avatar_name
             self.user_repo.db.add(user)
 
             # 6. 提交事务（和之前完全一样）

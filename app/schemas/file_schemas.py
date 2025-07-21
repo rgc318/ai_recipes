@@ -38,12 +38,18 @@ class PresignedUploadURL(BaseModel):
     object_name: str = Field(..., description="文件上传后在对象存储中的唯一路径/键")
     url: str = Field(..., description="文件上传成功后的最终可访问 URL")
 
+
 class AvatarLinkDTO(BaseModel):
-    object_name: str
-    original_filename: str
-    content_type: str
-    file_size: int
-    etag: Optional[str] = None
+    """
+    用于关联已上传头像的数据传输对象。
+    """
+    object_name: str = Field(..., description="由后端生成并返回的唯一对象名称。")
+    original_filename: str = Field(..., description="用户上传的原始文件名。")
+    content_type: str = Field(..., description="文件的MIME类型。")
+    file_size: int = Field(..., description="文件的字节大小。")
+
+    # ETag 并非所有对象存储都保证返回，设为可选更安全
+    etag: Optional[str] = Field(None, description="文件上传后，由对象存储返回的ETag。")
 
 
 
