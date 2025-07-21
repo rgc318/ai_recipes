@@ -37,3 +37,15 @@ class PresignedUploadURL(BaseModel):
     upload_url: str = Field(..., description="客户端可用于直接上传的预签名 URL")
     object_name: str = Field(..., description="文件上传后在对象存储中的唯一路径/键")
     url: str = Field(..., description="文件上传成功后的最终可访问 URL")
+
+class AvatarLinkDTO(BaseModel):
+    object_name: str
+    original_filename: str
+    content_type: str
+    file_size: int
+    etag: Optional[str] = None
+
+
+
+class PresignedAvatarRequest(BaseModel):
+    original_filename: str

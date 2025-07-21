@@ -8,6 +8,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from app.enums.auth_method import AuthMethod
 from app.models._model_utils.datetime import utcnow
 from app.models.base.base_model import BaseModel
+from app.models.file_record import FileRecord
 from app.schemas.user_schemas import UserRead
 
 
@@ -66,7 +67,10 @@ class User(BaseModel, table=True):
     login_count: int = Field(default=0)
 
     roles: List["Role"] = Relationship(back_populates="users", link_model=UserRole)
-
+    uploaded_files: List["FileRecord"] = Relationship(
+        back_populates="uploader"
+        # No need for foreign_keys hint if there's only one link
+    )
     # 【新增】乐观锁的版本号字段
 
     version: int = Field(

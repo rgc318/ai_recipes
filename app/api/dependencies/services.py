@@ -3,6 +3,7 @@ from fastapi import Depends
 
 
 from app.core.storage.storage_factory import storage_factory
+from app.services.file_record_service import FileRecordService
 from app.services.file_service import FileService
 from app.services.permission_service import PermissionService
 from app.services.role_service import RoleService
@@ -14,7 +15,7 @@ from app.db.get_repo_factory import get_repository_factory, RepositoryFactory
 def get_user_service(
     repo_factory: RepositoryFactory = Depends(get_repository_factory),
 ) -> UserService:
-    return UserService(repo_factory)
+    return UserService(repo_factory=repo_factory, file_service=get_file_service(), file_record_service=get_file_record_service())
 
 def get_recipes_service(
     repo_factory: RepositoryFactory = Depends(get_repository_factory),
@@ -40,3 +41,8 @@ file_service_instance = FileService(factory=storage_factory)
 def get_file_service() -> FileService:
     """MinioService 的依赖注入函数。"""
     return file_service_instance
+
+def get_file_record_service(
+    repo_factory: RepositoryFactory = Depends(get_repository_factory),
+) -> FileRecordService:
+    return FileRecordService(repo_factory, file_service=get_file_service())

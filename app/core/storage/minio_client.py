@@ -10,6 +10,7 @@ from app.config.settings import settings
 from app.core.logger import logger
 from app.config.config_schema import MinioClientConfig
 from app.core.storage.storage_interface import StorageClientInterface
+from app.utils.url_builder import build_public_storage_url
 
 
 class MinioClient(StorageClientInterface, ABC):
@@ -36,13 +37,14 @@ class MinioClient(StorageClientInterface, ABC):
     def build_final_url(self, object_name: str) -> str:
         """构建最终可访问的 URL (可能是 CDN URL)"""
         # 简化 URL 构建逻辑，CDN 逻辑也可以在这里处理
-        if self.cdn_base_url and self.minio_conf.public_endpoint is None:
-            return f"{self.cdn_base_url}/{object_name}"
-
-        if self.minio_conf.public_endpoint:
-            protocol = "https" if self.minio_conf.secure else "http"
-            return f"{protocol}://{self.minio_conf.public_endpoint}/{self.bucket_name}/{object_name}"
-        return f"{self.endpoint_url}/{self.bucket_name}/{object_name}"
+        # if self.cdn_base_url and self.minio_conf.public_endpoint is None:
+        #     return f"{self.cdn_base_url}/{object_name}"
+        #
+        # if self.minio_conf.public_endpoint:
+        #     protocol = "https" if self.minio_conf.secure else "http"
+        #     return f"{protocol}://{self.minio_conf.public_endpoint}/{self.bucket_name}/{object_name}"
+        # return f"{self.endpoint_url}/{self.bucket_name}/{object_name}"
+        return build_public_storage_url(object_name)
 
     def put_object(self, object_name: str, data: BinaryIO, length: int, content_type: str, acl: str = "public-read"):
         """底层 put_object 方法"""
