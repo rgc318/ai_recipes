@@ -2,7 +2,7 @@ import asyncio
 import os
 from asyncio import Semaphore
 from datetime import datetime
-from typing import BinaryIO, List, Literal
+from typing import BinaryIO, List, Literal, Any, Coroutine
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
@@ -16,7 +16,7 @@ from app.core.storage.minio_client import MinioClient
 from app.core.storage.storage_factory import StorageFactory
 from app.core.storage.storage_interface import StorageClientInterface
 from app.schemas.file_record_schemas import FileRecordRead
-from app.schemas.file_schemas import UploadResult, PresignedUploadURL
+from app.schemas.file_schemas import UploadResult, PresignedUploadURL, PresignedUploadPolicy
 
 
 class FileService:
@@ -27,9 +27,8 @@ class FileService:
     来动态地处理不同业务场景（Profiles）下的文件操作。
     """
 
-    def __init__(self, factory: StorageFactory, concurrency_limit: int = 5, max_file_size_mb: int = 10):
+    def __init__(self, factory: StorageFactory, concurrency_limit: int = 5):
         self.factory = factory
-        self.max_file_size_mb = max_file_size_mb
         self.upload_semaphore = Semaphore(concurrency_limit)
 
 
@@ -53,8 +52,9 @@ class FileService:
     #     await file.seek(0)
     #     return file_size
 
-    async def _validate_file(self, file: UploadFile, allowed_content_types: set) -> int:
+    async def _validate_file(self, file: UploadFile, profile_config) -> int:
         """内部方法：验证文件类型和大小，并返回文件大小。"""
+        allowed_content_types = set(profile_config.allowed_file_types)
         if file.content_type not in allowed_content_types:
             raise FileException(message=f"Unsupported file type for this profile: {file.content_type}")
 
@@ -62,8 +62,11 @@ class FileService:
         # 更优化的方式是流式检查，但对于中小型文件，这种方式是可行的。
         file.file.seek(0, os.SEEK_END)
         file_size = file.file.tell()
-        if file_size > self.max_file_size_mb * 1024 * 1024:
-            raise FileException(message=f"File is too large. Max size is {self.max_file_size_mb}MB.")
+
+        max_size_mb = getattr(profile_config, 'max_file_size_mb', 10) # 默认为 10MB
+        max_size_bytes = max_size_mb * 1024 * 1024
+        if file_size > max_size_bytes * 1024 * 1024:
+            raise FileException(message=f"File is too large. Max size is {max_size_mb}MB.")
 
         await file.seek(0)
         return file_size
@@ -169,7 +172,7 @@ class FileService:
             user_id=user_id  # 将 user_id 作为关键字参数传递
         )
 
-    async def upload_secure_report(self, file: UploadFile) -> dict:
+    async def upload_secure_report(self, file: UploadFile) -> UploadResult:
         """上传安全报告。"""
         return await self.upload_by_profile(file=file, profile_name="secure_reports")
 
@@ -197,8 +200,8 @@ class FileService:
         # 你需要一个映射或在配置中直接定义 content-type 列表
         # 为简化，我们假设 profile_config.allowed_file_types 就是一个 content-type 的集合
         # 例如: allowed_file_types: ["image/jpeg", "image/png"]
-        allowed_types_set = set(profile_config.allowed_file_types)  # 假设配置中是列表
-        file_size = await self._validate_file(file, allowed_types_set)
+
+        file_size = await self._validate_file(file, profile_config)
 
         # 4. 执行上传
         async with self.upload_semaphore:
@@ -361,3 +364,64 @@ class FileService:
         except ClientError as e:
             logger.error(f"Failed to generate PUT URL for {object_name}: {e}")
             raise FileException(message="Could not generate upload URL.")
+
+    async def generate_presigned_upload_policy(
+            self,
+            original_filename: str,
+            content_type: str,  # 【新增】前端需要告知文件的MIME类型
+            profile_name: str,
+            expires_in: int = 3600,
+            **path_params
+    ) -> PresignedUploadPolicy:
+        """
+        生成一个【带安全策略】的预签名POST Policy，供客户端上传。
+        """
+        # 1. 获取 Profile 配置，我们将从中读取策略
+        profile_config = self.factory.get_profile_config(profile_name)
+
+        # 2. 【安全检查】在后端验证前端声称的文件类型
+        allowed_types = set(profile_config.allowed_file_types)
+        if content_type not in allowed_types:
+            raise FileException(f"File type '{content_type}' is not allowed for this profile.")
+
+        # 准备上下文
+        client, object_name = self._prepare_upload_context(
+            profile_name=profile_name,
+            original_filename=original_filename,
+            **path_params
+        )
+
+        # 3. 【安全策略构建】为预签名URL构建上传条件
+        conditions = []
+        fields = {"Content-Type": content_type}
+
+        # 策略 a: 限制文件大小
+        max_size_mb = getattr(profile_config, 'max_file_size_mb', 10)
+        max_size_bytes = max_size_mb * 1024 * 1024
+        conditions.append(["content-length-range", 1, max_size_bytes])
+
+        # 策略 b: 限制文件类型 (这是对前端声称的 content_type 的再次确认)
+        conditions.append(["eq", "$Content-Type", content_type])
+
+        try:
+            # 调用底层客户端生成 POST Policy
+            policy_data = await run_in_threadpool(
+                client.generate_presigned_post_policy,
+                object_name=object_name,
+                expires_in=expires_in,
+                conditions=conditions,
+                fields=fields
+            )
+
+            # 使用新的 Pydantic Schema 封装返回结果
+            return PresignedUploadPolicy(
+                url=policy_data['url'],
+                fields=policy_data['fields'],
+                # 额外返回 object_name 和最终可访问的 url，方便前端
+                object_name=object_name,
+                final_url=client.build_final_url(object_name)
+            )
+        except ClientError as e:
+            logger.error(f"Failed to generate POST Policy for {object_name}: {e}")
+            raise FileException(message="Could not generate upload policy.")
+

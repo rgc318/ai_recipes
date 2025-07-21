@@ -1,12 +1,13 @@
 import os
 import json
 from abc import ABC
-from typing import BinaryIO, List, Dict
+from typing import BinaryIO, List, Dict, Optional, Any
 from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 import boto3
 
 from app.config.settings import settings
+from app.core.exceptions import FileException
 from app.core.logger import logger
 from app.config.config_schema import MinioClientConfig
 from app.core.storage.storage_interface import StorageClientInterface
@@ -78,6 +79,28 @@ class MinioClient(StorageClientInterface, ABC):
             Params={"Bucket": self.bucket_name, "Key": object_name},
             ExpiresIn=expires_in
         )
+
+    def generate_presigned_post_policy(
+        self,
+        object_name: str,
+        expires_in: int,
+        conditions: Optional[List[Any]] = None,
+        fields: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        生成带安全策略的预签名POST，用于客户端上传。
+        """
+        try:
+            return self.s3.generate_presigned_post(
+                Bucket=self.bucket_name,
+                Key=object_name,
+                Fields=fields,
+                Conditions=conditions,
+                ExpiresIn=expires_in
+            )
+        except ClientError as e:
+            logger.error(f"Failed to generate presigned POST policy for {object_name}: {e}")
+            raise FileException("Could not generate upload policy.")
 
     def create_bucket_if_not_exists(self, bucket_name: str):
         try:

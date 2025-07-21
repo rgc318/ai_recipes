@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies.permissions import require_superuser
 from app.core.security.security import get_current_user
 from app.db.session import get_session
-from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO
+from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
+    PresignedPolicyRequest
 from app.schemas.user_context import UserContext
 from app.services.file_service import FileService
 from app.services.user_service import UserService
@@ -108,6 +109,27 @@ async def generate_avatar_upload_url(
     )
     return response_success(data=presigned_data)
 
+
+@router.post(
+    "/me/avatar/generate-upload-policy",
+    response_model=StandardResponse[PresignedUploadPolicy],
+    summary="【安全模式】为上传新头像生成预签名POST策略 (推荐)"
+)
+async def generate_avatar_upload_policy(
+    payload: PresignedPolicyRequest, # 【修改】使用新的请求体模型
+    current_user: UserContext = Depends(get_current_user),
+    file_service: FileService = Depends(get_file_service)
+):
+    """
+    第一步（安全模式）：客户端调用此接口获取一个带安全策略的、用于POST上传的凭证。
+    """
+    policy_data = await file_service.generate_presigned_upload_policy(
+        profile_name="user_avatars",
+        original_filename=payload.original_filename,
+        content_type=payload.content_type, # 【修改】传入 content_type
+        user_id=str(current_user.id)
+    )
+    return response_success(data=policy_data)
 
 # 【新增】预签名流程的闭环接口
 @router.patch(

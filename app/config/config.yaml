@@ -79,6 +79,7 @@ storage_profiles:
   user_avatars:
     client: "public_cloud_storage"
     default_folder: "avatars/{user_id}"
+    max_file_size_mb: 5 # 比如，限制头像最大为5MB
     # 【修改】现在这是一个真正的 MIME 类型列表
     allowed_file_types:
       - "image/jpeg"
