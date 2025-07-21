@@ -72,6 +72,8 @@ class StorageProfileConfig(BaseModel):
     client: str = Field(..., description="该策略使用的客户端名称")
     default_folder: str = Field(..., description="默认存储的文件夹")
     allowed_file_types: List[str] = Field(..., description="允许上传的MIME类型列表, e.g., ['image/jpeg', 'image/png']")
+    # 【核心新增】为每个profile定义最大文件大小
+    max_file_size_mb: int = Field(10, description="该策略允许的最大文件大小 (MB)，默认为10MB")
 
 
 # ========================================================================================

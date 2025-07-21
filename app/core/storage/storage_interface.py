@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import BinaryIO, List, Dict
+from typing import BinaryIO, List, Dict, Optional, Any
+
 
 class StorageClientInterface(ABC):
     """
@@ -24,6 +25,20 @@ class StorageClientInterface(ABC):
     def get_presigned_url(self, client_method: str, object_name: str, expires_in: int) -> str:
         """
         生成预签名 URL (用于 GET 或 PUT)。
+        :param client_method: 'get_object' 或 'put_object'
+        """
+        pass
+
+    @abstractmethod
+    def generate_presigned_post_policy(
+        self,
+        object_name: str,
+        expires_in: int,
+        conditions: Optional[List[Any]] = None,
+        fields: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        生成预签名 URL (用于 POST)。
         :param client_method: 'get_object' 或 'put_object'
         """
         pass

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+
 
 class FileUploadResponse(BaseModel):
     object_name: str = Field(..., description="文件在存储桶中的完整路径/键。")
@@ -55,3 +56,39 @@ class AvatarLinkDTO(BaseModel):
 
 class PresignedAvatarRequest(BaseModel):
     original_filename: str
+
+# 【新增】为安全的POST策略请求创建一个新的DTO
+class PresignedPolicyRequest(BaseModel):
+    """为安全的POST预签名策略准备的请求体。"""
+    original_filename: str = Field(..., description="用户上传的原始文件名。")
+    content_type: str = Field(..., description="文件的MIME类型，例如 'image/jpeg'。")
+
+class PresignedUploadPolicy(BaseModel):
+    """
+    用于返回预签名POST Policy的数据传输对象。
+    它包含了前端直接向对象存储上传文件所需的所有信息。
+    """
+
+    url: str = Field(
+        ...,
+        description="前端必须向此URL以POST方法提交一个 multipart/form-data 表单。"
+    )
+
+    fields: Dict[str, Any] = Field(
+        ...,
+        description=(
+            "一个包含所有必需表单字段的字典。前端在构建form-data时，"
+            "必须将此字典中的每一个键值对都作为表单的一个字段。"
+            "这些字段包含了加密的策略和签名，是上传成功的关键。"
+        )
+    )
+
+    object_name: str = Field(
+        ...,
+        description="文件上传成功后，在存储桶中唯一的路径/键 (object_name)。"
+    )
+
+    final_url: str = Field(
+        ...,
+        description="文件上传成功后，最终可公开访问的URL。"
+    )
