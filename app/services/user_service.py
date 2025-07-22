@@ -236,7 +236,7 @@ class UserService(BaseService):
                 roles = []
                 unique_role_ids = list(set(role_ids))
                 if unique_role_ids:
-                    roles = await self.role_repo.get_by_ids(unique_role_ids)
+                    roles = await self.role_repo.get_by_ids_with_permissions(unique_role_ids)
                     if len(roles) != len(unique_role_ids):
                         raise NotFoundException("一个或多个角色不存在")
                     # 2. 直接在内存中修改 user.roles 属性
