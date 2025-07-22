@@ -41,6 +41,25 @@ class RoleRepository(BaseRepository[Role, RoleCreate, RoleUpdate]):
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_ids_with_permissions(self, role_ids: List[UUID]) -> List[Role]:
+        """
+        根据ID列表获取角色，并预先加载每个角色的权限。
+        这是 get_by_id_with_permissions 的批量版本。
+        """
+        if not role_ids:
+            return []
+
+        stmt = (
+            # 注意这里没有调用 self._base_stmt()，因为它可能包含 is_deleted=False
+            # 而在更新时，我们可能需要获取任何存在的角色ID，无论其状态。
+            # 如果你的 _base_stmt 也可以复用，那就更好了。
+            select(self.model)
+            .where(self.model.id.in_(role_ids))
+            .options(selectinload(self.model.permissions))
+        )
+        result = await self.db.execute(stmt)
+        # 使用 .all() 获取所有结果
+        return result.scalars().all()
     async def add_permission_to_role(self, role: Role, permission: Permission) -> Role:
         """
         在内存中为指定角色添加一个权限。不提交事务。

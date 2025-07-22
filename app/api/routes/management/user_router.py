@@ -252,7 +252,7 @@ async def update_user(
             code=ResponseCodeEnum.USER_NOT_FOUND,
             message="用户更新失败，用户不存在",
         )
-    return response_success(data=updated_user, message="用户更新成功")
+    return response_success(data=UserReadWithRoles.model_validate(updated_user), message="用户更新成功")
 
 
 # === Soft Delete User ===
@@ -290,4 +290,4 @@ async def admin_update_user_avatar(
         user_id=user_id,
         upload_file=file
     )
-    return response_success(data=updated_user, message="用户头像更新成功")
+    return response_success(data=UserRead.model_validate(updated_user), message="用户头像更新成功")

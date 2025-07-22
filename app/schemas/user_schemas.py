@@ -40,24 +40,29 @@ class UserCreate(UserBase):
     role_ids: Optional[List[UUID]] = Field(None, description="创建用户时要关联的角色ID列表。")
 
 # ==========================
-# 🔄 用户更新模型
+# 🔄 用户更新模型 (核心修改)
 # ==========================
-class UserUpdate(UserBase):
-    password: Optional[PasswordStr] = Field(None, description="新密码，留空则不修改")
-    is_active: Optional[bool] = Field(None, description="是否激活账户")
-    is_superuser: Optional[bool] = Field(None, description="是否为超级用户")
-    is_verified: Optional[bool] = Field(None, description="是否已验证")  # <-- 新增
-    is_locked: Optional[bool] = Field(None, description="是否已锁定")  # <-- 新增
-    role_ids: Optional[List[UUID]] = Field(None, description="分配给用户的角色ID列表")
-
-# ==========================
-# 🙋 用户更新自己的个人资料模型
-# ==========================
-class UserUpdateProfile(BaseModel):
+class UserUpdate(BaseModel): # 【修改】不再继承自 UserBase
+    """管理员更新用户信息的模型，不包含头像更新。"""
     full_name: Optional[str] = Field(None, description="完整姓名或昵称")
     email: Optional[EmailStr] = Field(None, description="邮箱地址")
     phone: Optional[str] = Field(None, description="手机号")
-    avatar_url: Optional[str] = Field(None, description="头像 URL")
+    password: Optional[PasswordStr] = Field(None, description="新密码，留空则不修改")
+    is_active: Optional[bool] = Field(None, description="是否激活账户")
+    is_superuser: Optional[bool] = Field(None, description="是否为超级用户")
+    is_verified: Optional[bool] = Field(None, description="是否已验证")
+    is_locked: Optional[bool] = Field(None, description="是否已锁定")
+    role_ids: Optional[List[UUID]] = Field(None, description="分配给用户的角色ID列表")
+
+# ==========================
+# 🙋 用户更新自己的个人资料模型 (核心修改)
+# ==========================
+class UserUpdateProfile(BaseModel): # 【修改】不再包含 avatar_url
+    """用户更新自己个人资料的模型，不包含头像更新。"""
+    full_name: Optional[str] = Field(None, description="完整姓名或昵称")
+    email: Optional[EmailStr] = Field(None, description="邮箱地址")
+    phone: Optional[str] = Field(None, description="手机号")
+
 # ==========================
 # 📤 用户读取模型
 # ==========================
