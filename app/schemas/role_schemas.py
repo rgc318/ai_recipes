@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, Field, conlist
@@ -19,6 +20,7 @@ class RoleBase(BaseModel):
     )
     name: str = Field(..., min_length=2, max_length=50, description="角色的显示名称，用于UI展示。例如：'内容编辑'。")
     description: Optional[str] = Field(None, max_length=255, description="角色的详细描述。")
+    created_at: Optional[datetime] = Field()
 
 
 class RoleCreate(RoleBase):
