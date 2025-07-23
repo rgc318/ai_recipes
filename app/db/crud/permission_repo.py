@@ -1,7 +1,8 @@
 import logging
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.crud.base_repo import BaseRepository
@@ -157,3 +158,76 @@ class PermissionRepository(BaseRepository[Permission, PermissionCreate, Permissi
             final_permission_list.extend(created_instances)
 
         return final_permission_list
+
+    async def sync_from_config(
+            self, permissions_data: List[Dict[str, Any]]
+    ) -> Dict[str, int]:
+        """
+        根据给定的配置数据，完整地同步权限表。
+        处理新增、更新和软删除（禁用）三种情况。
+        """
+        if not permissions_data:
+            return {'added': 0, 'updated': 0, 'disabled': 0}
+
+        source_codes = {p['code'] for p in permissions_data if 'code' in p}
+        source_map = {p['code']: p for p in permissions_data if 'code' in p}
+
+        # 1. 获取数据库中所有【未被删除】的权限
+        stmt = self._base_stmt()  # self._base_stmt() 会自动添加 is_deleted = false
+        result = await self.db.execute(stmt)
+        db_permissions = result.scalars().all()
+        db_map = {p.code: p for p in db_permissions}
+        db_codes = set(db_map.keys())
+
+        # 2. 计算差异
+        codes_to_add = source_codes - db_codes
+        codes_to_disable = db_codes - source_codes
+        codes_to_check_update = source_codes.intersection(db_codes)
+
+        added_count = 0
+        updated_count = 0
+        disabled_count = 0
+
+        # 3. 处理新增
+        if codes_to_add:
+            new_perms_data = [source_map[code] for code in codes_to_add]
+            new_objs = [self.model(**data) for data in new_perms_data]
+            self.db.add_all(new_objs)
+            await self.db.flush()
+            added_count = len(new_objs)
+            logger.info(f"权限同步：新增 {added_count} 个权限。")
+
+        # 4. 处理禁用 (软删除)
+        if codes_to_disable:
+            disable_stmt = (
+                update(self.model)
+                .where(self.model.code.in_(codes_to_disable))
+                .values(is_deleted=True, updated_at=datetime.now(timezone.utc))
+            )
+            res = await self.db.execute(disable_stmt)
+            disabled_count = res.rowcount
+            logger.info(f"权限同步：禁用了 {disabled_count} 个过时的权限。")
+
+        # 5. 【修正】处理更新，增加对 group 字段的检查
+        for code in codes_to_check_update:
+            db_perm = db_map[code]
+            source_perm_data = source_map[code]
+
+            # 检查 name, description 或 group 是否有变化
+            if (db_perm.name != source_perm_data.get('name') or
+                    db_perm.description != source_perm_data.get('description') or
+                    db_perm.group != source_perm_data.get('group')):  # <-- 新增 group 检查
+
+                # 更新所有可能变化的元数据字段
+                db_perm.name = source_perm_data.get('name', db_perm.name)
+                db_perm.description = source_perm_data.get('description', db_perm.description)
+                db_perm.group = source_perm_data.get('group', db_perm.group)  # <-- 新增 group 更新
+
+                self.db.add(db_perm)
+                updated_count += 1
+
+        if updated_count > 0:
+            await self.db.flush()
+            logger.info(f"权限同步：更新了 {updated_count} 个权限的元数据。")
+
+        return {'added': added_count, 'updated': updated_count, 'disabled': disabled_count}

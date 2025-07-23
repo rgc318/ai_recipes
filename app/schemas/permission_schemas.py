@@ -10,6 +10,7 @@ class PermissionBase(BaseModel):
     """
     code: str = Field(..., description="权限的唯一代码，系统内部使用，例如：'recipe:create'")
     name: str = Field(..., description="权限的唯一名称，例如：'order:create', 'user:read_all'")
+    group: str = Field(..., description="权限的所属模块，例如：'用户管理', '角色管理'")
     description: Optional[str] = Field(None, description="权限的详细描述，解释该权限的作用。")
 
 
@@ -38,8 +39,9 @@ class PermissionRead(PermissionBase):
     """
     id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 class PermissionSyncResponse(BaseModel):
@@ -57,5 +59,17 @@ class PermissionSyncResponse(BaseModel):
         description="本次新创建的权限对象的详细列表。"
     )
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
+
+
+
+class PermissionFilterParams(BaseModel):
+    """
+    权限列表查询的过滤参数模型。
+    FastAPI 将会自动从查询参数中解析并填充这个对象。
+    """
+    group: Optional[str] = None
+    # 统一将模糊搜索字段命名为 search
+    search: Optional[str] = None 

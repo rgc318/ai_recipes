@@ -10,7 +10,7 @@ from app.schemas.permission_schemas import (
     PermissionCreate,
     PermissionUpdate,
     PermissionRead,
-    PermissionSyncResponse  # 新增：用于同步结果的响应模型
+    PermissionSyncResponse, PermissionFilterParams  # 新增：用于同步结果的响应模型
 )
 from app.schemas.page_schemas import PageResponse  # 新增：引入分页响应模型
 from app.core.api_response import response_success, StandardResponse
@@ -45,54 +45,61 @@ async def create_permission(
 
 @router.get(
     "/",
-    response_model=StandardResponse[PageResponse[PermissionRead]], # 优化：使用分页响应模型
+    response_model=StandardResponse[PageResponse[PermissionRead]],
     summary="分页、排序和过滤权限列表"
 )
 async def list_permissions_paginated(
-    page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(10, ge=1, le=100, description="每页数量"),
-    order_by: str = Query("group:asc,name:asc", description="排序字段，格式: 'field:direction'"),
-    group: Optional[str] = Query(None, description="按权限组精确过滤"),
-    search: Optional[str] = Query(None, description="在code, name, description中进行模糊搜索"),
-    service: PermissionService = Depends(get_permission_service)
+        service: PermissionService = Depends(get_permission_service),
+        page: int = Query(1, ge=1, description="页码"),
+        per_page: int = Query(10, ge=1, le=100, description="每页数量"),
+        # 2. 将排序参数统一为 sort，与 user_router 保持一致
+        sort: Optional[str] = Query(
+            "group,name",  # 默认排序
+            description="排序字段，逗号分隔，-号表示降序。例如: -group,name"
+        ),
+        # 3. 使用 Depends 将所有过滤参数自动注入到 filter_params 对象中
+        filter_params: PermissionFilterParams = Depends(),
 ):
     """
-    获取权限的分页列表，并支持多种查询参数。
-
-    - **需要超级管理员权限。**
+    获取权限的分页列表，支持动态过滤和排序。
     """
+    # 4. 在 Router 层进行数据格式转换
+    sort_by_list = sort.split(',') if sort else None
+
+    # 5. 将 Pydantic 模型转为字典，只包含前端实际传入的参数
+    filters = filter_params.model_dump(exclude_unset=True)
+
+    # 6. 调用新的、简洁的 Service 接口
     page_data = await service.page_list_permissions(
         page=page,
         per_page=per_page,
-        order_by=order_by,
-        group=group,
-        search=search
+        sort_by=sort_by_list,
+        filters=filters
     )
-    # 对于分页数据，直接将其作为 data 字段返回
     return response_success(data=page_data)
 
 
-@router.post(
-    "/sync",
-    response_model=StandardResponse[PermissionSyncResponse], # 新增：使用专用的响应模型
-    summary="同步权限列表 (高阶管理功能)"
-)
-async def sync_permissions(
-    permissions_data: List[Dict[str, Any]], # 直接接收字典列表，更灵活
-    service: PermissionService = Depends(get_permission_service)
-):
-    """
-    从一个给定的列表（例如，来自配置文件）同步权限。
-
-    这个接口会批量检查权限是否存在，如果不存在则创建它们。
-    这是在系统初始化或版本更新时，确保所有必需权限都存在的关键接口。
-
-    - **需要超级管理员权限。**
-    - 请求体是一个JSON数组，每个对象必须包含 "code" 字段。
-      `[{"code": "orders:read", "name": "查看订单", "group": "订单管理"}, ...]`
-    """
-    sync_result = await service.sync_permissions(permissions_data)
-    return response_success(data=sync_result, message="权限同步完成")
+# @router.post(
+#     "/sync",
+#     response_model=StandardResponse[PermissionSyncResponse], # 新增：使用专用的响应模型
+#     summary="同步权限列表 (高阶管理功能)"
+# )
+# async def sync_permissions(
+#     permissions_data: List[Dict[str, Any]], # 直接接收字典列表，更灵活
+#     service: PermissionService = Depends(get_permission_service)
+# ):
+#     """
+#     从一个给定的列表（例如，来自配置文件）同步权限。
+#
+#     这个接口会批量检查权限是否存在，如果不存在则创建它们。
+#     这是在系统初始化或版本更新时，确保所有必需权限都存在的关键接口。
+#
+#     - **需要超级管理员权限。**
+#     - 请求体是一个JSON数组，每个对象必须包含 "code" 字段。
+#       `[{"code": "orders:read", "name": "查看订单", "group": "订单管理"}, ...]`
+#     """
+#     sync_result = await service.sync_permissions(permissions_data)
+#     return response_success(data=sync_result, message="权限同步完成")
 
 
 @router.get(
@@ -153,3 +160,38 @@ async def delete_permission(
     """
     await service.delete_permission(permission_id)
     # 对于 DELETE 成功操作，规范是返回 204 No Content，表示成功但无内容返回
+
+
+@router.post(
+    "/sync-from-source", # 新路径，更明确
+    response_model=StandardResponse[PermissionSyncResponse],
+    summary="【后端中心模式】从服务器配置文件同步权限"
+)
+async def sync_permissions_from_source(
+    service: PermissionService = Depends(get_permission_service)
+):
+    """
+    触发一次从后端配置文件 (permissions_enum.py) 到数据库的权限同步。
+    这是推荐的、更安全的自动化同步方式。
+    - **需要超级管理员权限。**
+    """
+    sync_result = await service.sync_permissions_from_source()
+    return response_success(data=sync_result, message="权限已从后端源文件同步完成")
+
+
+@router.post(
+    "/sync-from-payload", # 修改路径，使其职责更清晰
+    response_model=StandardResponse[PermissionSyncResponse],
+    summary="【前端驱动模式】根据请求体内容同步权限"
+)
+async def sync_permissions_from_payload(
+    permissions_data: List[Dict[str, Any]],
+    service: PermissionService = Depends(get_permission_service)
+):
+    """
+    从请求体 (payload) 中接收一个权限列表，并与数据库同步。
+    这个接口提供了极大的灵活性，允许任何客户端提供权限定义源。
+    - **需要超级管理员权限。**
+    """
+    sync_result = await service.sync_permissions(permissions_data)
+    return response_success(data=sync_result, message="权限已从请求体同步完成")

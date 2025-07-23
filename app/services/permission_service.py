@@ -4,10 +4,11 @@ from uuid import UUID
 
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.config.permissions_enum import PERMISSIONS_CONFIG
 from app.db.repository_factory_auto import RepositoryFactory
 from app.models.user import Permission
 from app.schemas.page_schemas import PageResponse
-from app.schemas.permission_schemas import PermissionCreate, PermissionUpdate
+from app.schemas.permission_schemas import PermissionCreate, PermissionUpdate, PermissionRead
 from app.db.crud.permission_repo import PermissionRepository
 from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
 from app.services._base_service import BaseService
@@ -52,39 +53,52 @@ class PermissionService(BaseService):
             self,
             page: int = 1,
             per_page: int = 10,
-            order_by: str = "group:asc,name:asc",
-            group: Optional[str] = None,
-            search: Optional[str] = None
-    ) -> PageResponse[Permission]:
+            sort_by: Optional[List[str]] = None,
+            filters: Optional[Dict[str, Any]] = None,
+    ) -> PageResponse[PermissionRead]:
         """
-        获取权限的分页列表，支持按分组过滤和模糊搜索。
-
-        Args:
-            page: 页码。
-            per_page: 每页数量。
-            order_by: 排序字段 (e.g., 'group:asc,name:desc')。
-            group: 按分组精确过滤。
-            search: 在 'code', 'name', 'description' 字段中进行模糊搜索。
-
-        Returns:
-            权限的分页响应对象。
+        获取权限的分页列表，支持动态过滤和排序。
         """
-        filters = {}
-        if group:
-            filters['group'] = group
+        # 1. 准备传递给 repo 层的过滤器字典
+        repo_filters = filters or {}
 
-        # 定义可以被模糊搜索的字段
-        search_fields = ['code', 'name', 'description']
+        # 2. 转换查询条件：将前端友好的模糊搜索参数转为 repo 指令
+        #    例如, 将 "search=admin" 转换为对多个字段的 OR ILIKE 查询
+        if 'search' in repo_filters and repo_filters['search']:
+            search_value = f"%{repo_filters.pop('search')}%"
+            # 使用 `__or__` 约定来告诉 BaseRepository 执行 OR 查询
+            repo_filters['__or__'] = {
+                'name__ilike': search_value,
+                'code__ilike': search_value,
+                'description__ilike': search_value,
+            }
 
-        return await self.permission_repo.list_with_filters(
+        # 对于精确匹配的字段，可以直接传递
+        if 'group' in repo_filters and repo_filters['group']:
+            # 明确指定为精确匹配
+            repo_filters['group__eq'] = repo_filters.pop('group')
+
+        # 3. 调用 Repository 层的通用分页方法
+        #    注意：PermissionRepository 继承了 BaseRepository，因此拥有 get_paged_list 方法
+        paged_permissions_orm = await self.permission_repo.get_paged_list(
             page=page,
             per_page=per_page,
-            order_by=order_by,
-            filters=filters,
-            search=search,
-            search_fields=search_fields
+            sort_by=sort_by,
+            filters=repo_filters,
         )
 
+        # 4. (可选) 对返回数据进行处理和转换
+        #    这里我们直接将 ORM 对象列表转换为 Pydantic Read 模型列表
+        items_dto = [PermissionRead.model_validate(p) for p in paged_permissions_orm.items]
+
+        # 5. 返回符合 PageResponse[PermissionRead] 结构的数据
+        return PageResponse(
+            items=items_dto,
+            page=paged_permissions_orm.page,
+            per_page=paged_permissions_orm.per_page,
+            total=paged_permissions_orm.total,
+            total_pages=paged_permissions_orm.total_pages
+        )
     # --- 核心写操作 (带事务管理) ---
 
     async def create_permission(self, permission_in: PermissionCreate) -> Permission:
@@ -158,32 +172,65 @@ class PermissionService(BaseService):
 
     # --- 批量与同步操作 ---
 
-    async def sync_permissions(self, permissions_data: List[Dict[str, Any]]) -> Dict[str, int]:
-        """
-        从一个“源数据”同步权限，批量创建不存在的权限。
-        这是系统初始化或部署时确保所有必要权限存在的核心方法。
+    # async def sync_permissions(self, permissions_data: List[Dict[str, Any]]) -> Dict[str, int]:
+    #     """
+    #     从一个“源数据”同步权限，批量创建不存在的权限。
+    #     这是系统初始化或部署时确保所有必要权限存在的核心方法。
+    #
+    #     Args:
+    #         permissions_data: 权限字典列表，每个字典必须包含 'code'。
+    #
+    #     Returns:
+    #         一个包含同步结果的字典, e.g., {'total': 20, 'found': 15, 'created': 5}
+    #     """
+    #     total_count = len(permissions_data)
+    #     if total_count == 0:
+    #         return {'total': 0, 'found': 0, 'created': 0}
+    #
+    #     try:
+    #         all_permissions = await self.permission_repo.bulk_get_or_create(permissions_data)
+    #         await self.permission_repo.commit()
+    #     except Exception as e:
+    #         await self.permission_repo.rollback()
+    #         logger.error(f"同步权限失败: {e}")
+    #         raise
+    #
+    #     found_count = total_count - (len(all_permissions) - total_count)
+    #     created_count = len(all_permissions) - found_count
+    #
+    #     result = {'total': total_count, 'found': found_count, 'created': created_count}
+    #     logger.info(f"权限同步完成: {result}")
+    #     return result
 
-        Args:
-            permissions_data: 权限字典列表，每个字典必须包含 'code'。
-
-        Returns:
-            一个包含同步结果的字典, e.g., {'total': 20, 'found': 15, 'created': 5}
-        """
-        total_count = len(permissions_data)
-        if total_count == 0:
-            return {'total': 0, 'found': 0, 'created': 0}
-
+    async def sync_permissions(self, permissions_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """从一个“源数据”同步权限，处理增、改、删。"""
         try:
-            all_permissions = await self.permission_repo.bulk_get_or_create(permissions_data)
+            # 直接调用新的、功能强大的 repo 方法
+            result_stats = await self.permission_repo.sync_from_config(permissions_data)
             await self.permission_repo.commit()
+
+            # 构造更详细的返回信息
+            total = len(permissions_data)
+            final_result = {
+                'total': total,
+                'created': result_stats.get('added', 0),
+                'updated': result_stats.get('updated', 0),
+                'disabled': result_stats.get('disabled', 0),
+            }
+            final_result['found'] = total - final_result['created']
+
+            logger.info(f"权限同步完成: {final_result}")
+            return final_result
         except Exception as e:
             await self.permission_repo.rollback()
             logger.error(f"同步权限失败: {e}")
             raise
-
-        found_count = total_count - (len(all_permissions) - total_count)
-        created_count = len(all_permissions) - found_count
-
-        result = {'total': total_count, 'found': found_count, 'created': created_count}
-        logger.info(f"权限同步完成: {result}")
-        return result
+    async def sync_permissions_from_source(self) -> Dict[str, int]:
+        """
+        【模式二：后端中心】从后端配置文件 (permissions_enum.py) 同步权限。
+        这是一个自给自足的方法，不依赖外部输入。
+        """
+        # 直接调用现有的 sync_permissions 方法，将后端配置作为数据源传入
+        # 这体现了代码的高度复用
+        self.logger.info("Starting permission sync from backend source file...")
+        return await self.sync_permissions(PERMISSIONS_CONFIG)

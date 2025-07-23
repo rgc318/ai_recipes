@@ -36,6 +36,7 @@ class Permission(BaseModel, table=True):
     code: str = Field(..., unique=True, index=True, description="权限的唯一代码，如 'recipe:create'")
     # name 字段现在作为可随时修改的、对用户友好的显示名称
     name: str = Field(..., description="权限的显示名称，如 '创建菜谱'")
+    group: str = Field(..., description="所属模块，如 '用户管理'")
     description: Optional[str] = None
 
     roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)

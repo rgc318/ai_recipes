@@ -46,8 +46,9 @@ class RoleRead(RoleBase):
     """
     id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 class RoleReadWithPermissions(RoleRead):
@@ -76,5 +77,6 @@ class RoleSelectorRead(BaseModel):
     id: UUID
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }

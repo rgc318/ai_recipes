@@ -1,4 +1,4 @@
-# app/api/dependencies/permissions.py
+# app/api/dependencies/permissions_enum.py
 
 from fastapi import Depends, HTTPException
 from starlette import status
