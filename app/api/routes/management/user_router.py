@@ -226,8 +226,18 @@ async def list_users_paginated(
     # 将 Pydantic 模型转为字典，只包含前端实际传入的参数
     # 这是最关键的一步，确保了只有用户请求的过滤器才会被传递
     filters = filter_params.model_dump(exclude_unset=True)
+    # 1. 定义一个列表，包含所有希望自动应用模糊搜索的字段名
+    fuzzy_search_fields = ['username', 'email', 'phone', 'full_name']
+    # 2. 遍历这个列表，检查 filters 字典中是否存在这些键
+    for field in fuzzy_search_fields:
+        if field in filters:
+            # 3. 如果存在，就从原字典中弹出(pop)这个键值对
+            value = filters.pop(field)
+            # 4. 同时，以 "字段名__ilike" 的新键名，将它重新放回字典
+            filters[f'{field}__ilike'] = value
+
     if role_ids:
-        filters['role_ids'] = role_ids
+        filters['role_ids__in'] = role_ids
     # 5. 使用新的、简洁的接口调用 Service
     page_data = await service.page_list_users(
         page=page,

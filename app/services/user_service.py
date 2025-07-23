@@ -91,8 +91,10 @@ class UserService(BaseService):
         # return self._set_full_avatar_url(user)
         return user
 
-    # --- 用户列表 ---
-
+    # =================================================================
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修改点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # 重构 page_list_users 方法，使其职责更清晰
+    # =================================================================
     async def page_list_users(
             self,
             page: int = 1,
@@ -101,45 +103,35 @@ class UserService(BaseService):
             filters: Optional[Dict[str, Any]] = None,
     ) -> PageResponse[UserReadWithRoles]:
         """
-        获取用户分页列表 (动态查询最终版)。
+        获取用户分页列表。
+        此方法现在将过滤参数的构造完全委托给上层(Router)，
+        自身只负责调用数据层和处理返回的业务数据。
         """
-        # 1. 准备传递给 repo 层的过滤器字典
-        repo_filters = filters or {}
-
-        # 2. 转换查询条件：将前端友好的查询转为后端Repo能理解的指令
-        #    例如，将 "username=admin" 转换为 "username__ilike=%admin%"
-        for field in ['username', 'email', 'phone', 'full_name']:
-            if field in repo_filters and repo_filters[field]:
-                # 从原始字典中弹出该值，并添加带操作符的新键值对
-                value = repo_filters.pop(field)
-                repo_filters[f'{field}__ilike'] = f"%{value}%"
-
-        # 对于关联字段，我们约定使用 `__in`
-        if 'role_ids' in repo_filters and repo_filters['role_ids']:
-            value = repo_filters.pop('role_ids')
-            repo_filters['role_ids__in'] = value
-
-        # 3. 调用现在非常简洁的 repo 方法
+        # 1. 直接调用 UserRepository 中已经封装好的分页方法
+        #    Service 层不再关心 `filters` 字典内部是如何构造的。
         paged_users_orm = await self.user_repo.get_paged_users(
             page=page,
             per_page=per_page,
             sort_by=sort_by,
-            filters=repo_filters,
+            filters=filters or {},
         )
 
-        # 4. 将 ORM 结果转换为 Pydantic Schema
+        # 2. 【核心业务逻辑】对从数据层获取的原始数据进行处理和丰富
         items_with_permissions = []
         for user in paged_users_orm.items:
-            # user = self._set_full_avatar_url(user)
+            # 2.1 将 ORM 对象转换为 Pydantic DTO
             user_dto = UserReadWithRoles.model_validate(user)
-            # 计算并填充用户的总权限集合 (这是一个很好的优化)
+
+            # 2.2 聚合计算用户的总权限集合，这是一个非常有价值的业务逻辑
             all_permissions = set()
             for role in user.roles:
                 for perm in role.permissions:
                     all_permissions.add(perm.code)
-            user_dto.permissions = all_permissions
+            user_dto.permissions = list(all_permissions)  # 返回列表更符合JSON标准
+
             items_with_permissions.append(user_dto)
 
+        # 3. 返回符合标准分页响应结构的数据
         return PageResponse(
             items=items_with_permissions,
             page=paged_users_orm.page,
@@ -147,6 +139,8 @@ class UserService(BaseService):
             total=paged_users_orm.total,
             total_pages=paged_users_orm.total_pages
         )
+
+    # =================================================================
 
     # --- 用户操作 ---
 

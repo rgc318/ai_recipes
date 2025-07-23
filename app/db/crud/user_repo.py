@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from math import ceil
 from typing import Optional, Union, Any, List
 from uuid import UUID
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import selectinload
@@ -168,30 +168,42 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             await self.db.flush()
         return user
 
-    async def get_paged_users(
-            self,
-            *,
-            page: int,
-            per_page: int,
-            filters: dict,
-            sort_by: List[str],
-    ) -> PageResponse[User]:
+    async def clear_roles_by_user_ids(self, user_ids: list[UUID]) -> int:
         """
-        获取用户分页列表。
-        此方法现在只是对 BaseRepository.get_paged_list 的一个简单封装，
-        主要目的是指定需要预加载的关联字段。
+        根据用户ID列表，物理删除 user_role 表中的关联记录。
+        这是硬删除，因为关联本身没有“软删除”的状态。
         """
-        eager_loading_options = [
-            selectinload(self.model.roles).selectinload(Role.permissions)
-        ]
-        return await self.get_paged_list(
-            page=page,
-            per_page=per_page,
-            filters=filters,
-            sort_by=sort_by,
-            # 指定需要预加载的关系，支持链式加载
-            eager_loads=eager_loading_options
-        )
+        if not user_ids:
+            return 0
+
+        # 直接使用 delete() 函数来构建 DELETE 语句
+        stmt = delete(UserRole).where(UserRole.user_id.in_(user_ids))
+        result = await self.db.execute(stmt)
+        return result.rowcount
+    # async def get_paged_users(
+    #         self,
+    #         *,
+    #         page: int,
+    #         per_page: int,
+    #         filters: dict,
+    #         sort_by: List[str],
+    # ) -> PageResponse[User]:
+    #     """
+    #     获取用户分页列表。
+    #     此方法现在只是对 BaseRepository.get_paged_list 的一个简单封装，
+    #     主要目的是指定需要预加载的关联字段。
+    #     """
+    #     eager_loading_options = [
+    #         selectinload(self.model.roles).selectinload(Role.permissions)
+    #     ]
+    #     return await self.get_paged_list(
+    #         page=page,
+    #         per_page=per_page,
+    #         filters=filters,
+    #         sort_by=sort_by,
+    #         # 指定需要预加载的关系，支持链式加载
+    #         eager_loads=eager_loading_options
+    #     )
 
     # 如果确实有特殊字段处理需求，可以保留 create 重写，否则可以删除此方法，使用父类的
     # async def create(self, user_data: Union[UserCreate, dict]) -> User:
@@ -202,3 +214,47 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     #     if not user:
     #         return None
     #     return await super().update(user, updates)
+
+    # =================================================================
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修改点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # 使用新的、职责清晰的分页查询方法替换所有旧的实现
+    # =================================================================
+    async def get_paged_users(
+            self,
+            *,
+            page: int,
+            per_page: int,
+            filters: dict,
+            sort_by: List[str],
+    ) -> PageResponse[User]:
+        """
+        获取用户分页列表。
+        此方法负责处理 User 特有的过滤逻辑（如按角色ID），
+        然后调用通用的父类方法完成查询。
+        """
+        # 1. 开始一个基础查询语句
+        stmt = self._base_stmt()
+
+        # 2. 【预处理】处理 User 特有的过滤逻辑
+        if 'role_ids__in' in filters:
+            role_ids = filters.pop('role_ids__in')
+            # 在主查询语句上直接应用 JOIN 和 WHERE 条件
+            stmt = stmt.join(
+                UserRole, self.model.id == UserRole.user_id
+            ).where(UserRole.role_id.in_(role_ids)).distinct()
+
+        # 3. 定义需要“预加载”的关联数据
+        eager_loading_options = [
+            selectinload(self.model.roles).selectinload(Role.permissions)
+        ]
+
+        # 4. 调用父类的、完全通用的分页方法，并传入预处理过的参数
+        return await self.get_paged_list(
+            page=page,
+            per_page=per_page,
+            filters=filters,  # 此处 filters 已被处理过，不包含 role_ids__in
+            sort_by=sort_by,
+            eager_loads=eager_loading_options,
+            stmt_in=stmt  # 传入我们已经附加了 JOIN 的查询语句
+        )
+    # =================================================================
