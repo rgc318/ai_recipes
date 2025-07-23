@@ -132,22 +132,29 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         result = await self.db.execute(stmt)
         return result.rowcount
 
+    async def update_by_id_and_return(self, item_id: Any, update_data: Dict[str, Any]) -> Optional[ModelType]:
+        """
+        根据ID更新记录，并返回更新后的对象。
+        注意：这依赖于数据库对 RETURNING 子句的支持 (如 PostgreSQL)。
+        """
+        if not update_data:
+            return None
+
+        if hasattr(self.model, "updated_at"):
+            update_data["updated_at"] = datetime.now(timezone.utc)
+
+        stmt = (
+            update(self.model)
+            .where(self.model.id == item_id)
+            .values(**update_data)
+            .returning(self.model)  # <-- 关键部分
+        )
+        result = await self.db.execute(stmt)
+        await self.commit()  # 直接更新需要手动提交
+        return result.scalar_one_or_none()
     # ==========================
     # 数据删除方法 (Delete)
     # ==========================
-
-    async def clear_roles_by_user_ids(self, user_ids: list[UUID]) -> int:
-        """
-        根据用户ID列表，物理删除 user_role 表中的关联记录。
-        这是硬删除，因为关联本身没有“软删除”的状态。
-        """
-        if not user_ids:
-            return 0
-
-        # 直接使用 delete() 函数来构建 DELETE 语句
-        stmt = delete(UserRole).where(UserRole.user_id.in_(user_ids))
-        result = await self.db.execute(stmt)
-        return result.rowcount
 
     async def delete(self, db_obj: ModelType) -> None:
         """
@@ -203,9 +210,14 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
     # ==========================
 
     def _base_stmt(self):
+        """
+        构建基础查询语句，默认过滤掉软删除的记录 (如果模型支持)。
+        """
+        stmt = select(self.model)
         if hasattr(self.model, 'is_deleted'):
-            return select(self.model).where(self.model.is_deleted == False)
-        return select(self.model)
+            # 使用 getattr 安全地获取列对象
+            stmt = stmt.where(getattr(self.model, 'is_deleted') == False)
+        return stmt
 
     async def get_by_id(self, id: Any) -> Optional[ModelType]:
         stmt = self._base_stmt().where(self.model.id == id)
@@ -280,7 +292,18 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             )
         return await self._run_and_scalar(stmt, f"get_one_by_{field}")
 
+    async def find_by_field(self, value: Any, field_name: str, case_insensitive: bool = False) -> Optional[ModelType]:
+        """通过指定字段查找单个对象 (可选)"""
+        column = getattr(self.model, field_name)
+        stmt = self._base_stmt()  # 应该也应用软删除过滤
 
+        if case_insensitive:
+            stmt = stmt.where(column.ilike(value))
+        else:
+            stmt = stmt.where(column == value)
+
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def list(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
         stmt = self._base_stmt().offset(skip).limit(limit)
@@ -359,45 +382,48 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             logger.error(f"[{method}] Failed: {e}")
             raise
 
-    def _apply_dynamic_filters(self, stmt, filters: Dict[str, Any]):
-        """
-        一个强大的动态过滤器应用函数，理解 `field__operator` 语法。
-        """
-        if not filters:
-            return stmt
+    # def _apply_dynamic_filters(self, stmt, filters: Dict[str, Any]):
+    #     """
+    #     一个强大的动态过滤器应用函数，理解 `field__operator` 语法。
+    #     """
+    #     if not filters:
+    #         return stmt
+    #
+    #     for key, value in filters.items():
+    #         if value is None or value == '':
+    #             continue
+    #
+    #         parts = key.split('__')
+    #         field_name = parts[0]
+    #         op_name = parts[1] if len(parts) > 1 else 'eq'  # 默认为等于
+    #
+    #         # 特殊处理：关联查询
+    #         # 这个逻辑可以根据需要扩展
+    #         if field_name == 'role_ids' and op_name == 'in':
+    #             from app.models.user import UserRole
+    #             stmt = stmt.join(UserRole, self.model.id == UserRole.user_id).where(
+    #                 UserRole.role_id.in_(value)).distinct()
+    #             continue
+    #
+    #         # 普通字段查询
+    #         column = getattr(self.model, field_name, None)
+    #         if column is None:
+    #             logger.warning(f"Ignored invalid filter field: {field_name}")
+    #             continue
+    #
+    #         op_func = OPERATOR_MAP.get(op_name)
+    #         if op_func:
+    #             if isinstance(op_func, str):  # 'in_', 'not_in', 'like', 'ilike'
+    #                 stmt = stmt.where(getattr(column, op_func)(value))
+    #             else:  # 其他操作符
+    #                 stmt = stmt.where(op_func(column, value))
+    #         else:
+    #             logger.warning(f"Ignored invalid filter operator: {op_name}")
+    #     return stmt
 
-        for key, value in filters.items():
-            if value is None or value == '':
-                continue
-
-            parts = key.split('__')
-            field_name = parts[0]
-            op_name = parts[1] if len(parts) > 1 else 'eq'  # 默认为等于
-
-            # 特殊处理：关联查询
-            # 这个逻辑可以根据需要扩展
-            if field_name == 'role_ids' and op_name == 'in':
-                from app.models.user import UserRole
-                stmt = stmt.join(UserRole, self.model.id == UserRole.user_id).where(
-                    UserRole.role_id.in_(value)).distinct()
-                continue
-
-            # 普通字段查询
-            column = getattr(self.model, field_name, None)
-            if column is None:
-                logger.warning(f"Ignored invalid filter field: {field_name}")
-                continue
-
-            op_func = OPERATOR_MAP.get(op_name)
-            if op_func:
-                if isinstance(op_func, str):  # 'in_', 'not_in', 'like', 'ilike'
-                    stmt = stmt.where(getattr(column, op_func)(value))
-                else:  # 其他操作符
-                    stmt = stmt.where(op_func(column, value))
-            else:
-                logger.warning(f"Ignored invalid filter operator: {op_name}")
-        return stmt
-
+    # =================================================================
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 替换此方法 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # =================================================================
     async def get_paged_list(
             self,
             *,
@@ -405,19 +431,20 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             per_page: int = 10,
             filters: Optional[Dict[str, Any]] = None,
             sort_by: Optional[List[str]] = None,
-            eager_loads: Optional[List[str]] = None,
+            eager_loads: Optional[List[Any]] = None,
+            stmt_in: Optional[Any] = None  # 1. 【关键修复】在这里添加 stmt_in 参数
     ) -> PageResponse[ModelType]:
         """
         【全新】通用的、支持动态过滤和排序的分页查询方法。
         这将是所有 Repo 的分页查询入口。
         """
-        # 1. 基础语句
-        stmt = self._base_stmt()
+        # 2. 【关键修复】如果传入了预处理过的 statement，就使用它；否则，创建默认的
+        stmt = stmt_in if stmt_in is not None else self._base_stmt()
 
-        # 2. 应用动态过滤
+        # 3. 应用动态过滤
         stmt = self._apply_dynamic_filters(stmt, filters or {})
 
-        # 3. 计算总数 (在分页前)
+        # 4. 计算总数 (在分页前)
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total_result = await self.db.execute(count_stmt)
         total = total_result.scalar_one_or_none() or 0
@@ -425,18 +452,17 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         if total == 0:
             return PageResponse(items=[], total=0, page=page, per_page=per_page, total_pages=0)
 
-        # 4. 应用排序和分页
+        # 5. 应用排序和分页
         stmt = self.apply_ordering(stmt, sort_by or [])
         stmt = stmt.offset((page - 1) * per_page).limit(per_page)
 
-        # 5. 应用预加载 (Eager Loading)
+        # 6. 应用预加载 (Eager Loading)
         if eager_loads:
             for option in eager_loads:
                 stmt = stmt.options(option)
 
-        # 6. 执行查询并返回结果
+        # 7. 执行查询并返回结果
         items_result = await self.db.execute(stmt)
-        # 使用 .unique() 防止JOIN带来的重复ORM对象
         items = items_result.unique().scalars().all()
 
         return PageResponse(
@@ -446,3 +472,69 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             per_page=per_page,
             total_pages=ceil(total / per_page) if per_page > 0 else 0,
         )
+    # =================================================================
+
+    # =================================================================
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 替换为下面两个方法 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # =================================================================
+
+    def _build_condition(self, key: str, value: Any):
+        """
+        【新增】一个内部辅助函数，根据 key 和 value 构建单个查询条件。
+        """
+        parts = key.split('__')
+        field_name = parts[0]
+        op_name = parts[1] if len(parts) > 1 else 'eq'
+
+        column = getattr(self.model, field_name, None)
+        if column is None:
+            logger.warning(f"Ignored invalid filter field: {field_name}")
+            return None
+
+        op_func = OPERATOR_MAP.get(op_name)
+        if op_func:
+            if isinstance(op_func, str):  # 'in_', 'not_in', 'like', 'ilike'
+                # ✨ 关键增强：对 like 和 ilike 操作自动添加通配符
+                if op_name in ('like', 'ilike'):
+                    return getattr(column, op_func)(f"%{value}%")
+                else:
+                    return getattr(column, op_func)(value)
+            else:  # 其他操作符
+                return op_func(column, value)
+        else:
+            logger.warning(f"Ignored invalid filter operator: {op_name}")
+            return None
+
+    def _apply_dynamic_filters(self, stmt, filters: Dict[str, Any]):
+        """
+        【重构后】一个更强大、更简洁、职责更清晰的动态过滤器。
+        """
+        if not filters:
+            return stmt
+
+        or_conditions_data = filters.pop('__or__', {})
+        and_conditions_data = filters
+
+        # 处理 AND 条件
+        for key, value in and_conditions_data.items():
+            if value is None or value == '':
+                continue
+            condition = self._build_condition(key, value)
+            if condition is not None:
+                stmt = stmt.where(condition)
+
+        # 处理 OR 条件
+        if or_conditions_data:
+            or_clauses = []
+            for key, value in or_conditions_data.items():
+                if value is None or value == '':
+                    continue
+                condition = self._build_condition(key, value)
+                if condition is not None:
+                    or_clauses.append(condition)
+
+            if or_clauses:
+                stmt = stmt.where(or_(*or_clauses))
+
+        return stmt
+    # =================================================================
