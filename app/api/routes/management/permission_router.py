@@ -10,7 +10,7 @@ from app.schemas.permission_schemas import (
     PermissionCreate,
     PermissionUpdate,
     PermissionRead,
-    PermissionSyncResponse, PermissionFilterParams  # 新增：用于同步结果的响应模型
+    PermissionSyncResponse, PermissionFilterParams, PermissionSelectorRead  # 新增：用于同步结果的响应模型
 )
 from app.schemas.page_schemas import PageResponse  # 新增：引入分页响应模型
 from app.core.api_response import response_success, StandardResponse
@@ -19,6 +19,18 @@ from app.core.api_response import response_success, StandardResponse
 # 使用全局依赖来保护所有接口，这是非常好的实践
 router = APIRouter(dependencies=[Depends(require_superuser)])
 
+
+@router.get(
+    "/selector",
+    response_model=StandardResponse[List[PermissionSelectorRead]],
+    summary="获取用于下拉选择框的权限列表"
+)
+async def get_permissions_for_selector(
+    service: PermissionService = Depends(get_permission_service)
+):
+    """获取一个轻量级的权限列表，专门用于前端的下拉选择框。"""
+    permissions = await service.get_all_permissions() # 我们需要在 Service 中添加这个方法
+    return response_success(data=[PermissionSelectorRead.model_validate(p) for p in permissions])
 
 @router.post(
     "/",

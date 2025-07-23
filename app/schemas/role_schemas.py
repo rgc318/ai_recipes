@@ -80,3 +80,11 @@ class RoleSelectorRead(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+class RoleFilterParams(BaseModel):
+    """
+    角色列表查询的过滤参数模型。
+    FastAPI 将会自动从查询参数中解析并填充这个对象。
+    """
+    # 保持与 permission 模块一致的通用搜索框设计
+    search: Optional[str] = Field(None, description="按角色名称或代码进行模糊搜索")
