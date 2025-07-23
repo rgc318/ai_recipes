@@ -417,6 +417,8 @@ class UserService(BaseService):
         if not verify_password(old_plain_password, user.hashed_password):
             raise UnauthorizedException("旧密码不正确")
 
+        if old_plain_password == new_plain_password:
+            raise UnauthorizedException("新密码不能和旧密码相同")
         # 复用已有的、不验证旧密码的 change_password 方法
         await self.change_password(user_id, new_plain_password)
 
