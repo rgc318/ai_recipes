@@ -26,8 +26,9 @@ class FileRecordRead(BaseModel):
     url: Optional[str] = Field(None, description="文件的可访问 URL")
 
     # 允许从 ORM 对象模型进行转换
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 class FileRecordUpdate(BaseModel):

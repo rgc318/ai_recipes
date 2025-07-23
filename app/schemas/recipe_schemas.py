@@ -11,8 +11,9 @@ class TagBase(BaseModel):
 class TagRead(TagBase):
     id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 # === Unit ===
@@ -26,8 +27,9 @@ class UnitBase(BaseModel):
 class UnitRead(UnitBase):
     id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 # === Ingredient ===
@@ -40,8 +42,9 @@ class IngredientBase(BaseModel):
 class IngredientRead(IngredientBase):
     id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 # === RecipeIngredient ===
@@ -59,8 +62,9 @@ class RecipeIngredientRead(BaseModel):
     ingredient: IngredientRead
     unit: Optional[UnitRead] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 # === Recipe ===
@@ -89,5 +93,6 @@ class RecipeRead(RecipeBase):
     tags: List[TagRead] = []
     ingredients: List[RecipeIngredientRead] = []
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }

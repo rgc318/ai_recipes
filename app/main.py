@@ -4,12 +4,14 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.security.middleware import AuditMiddleware
-from app.db.session import create_db_and_tables
+from app.db.repository_factory_auto import RepositoryFactory
+from app.db.session import create_db_and_tables, get_session
 from contextlib import asynccontextmanager
 from app.core.logger import logger
 from app.core.exceptions import BaseBusinessException, UnauthorizedException
 from app.core.response_codes import ResponseCodeEnum
 from app.config.settings import settings
+from app.services.permission_service import PermissionService
 from app.utils.redis_client import RedisClient
 
 
@@ -29,6 +31,29 @@ async def lifespan(app: FastAPI):
         socket_connect_timeout=redis_cfg.socket_connect_timeout,
         serializer=redis_cfg.serializer,
     )
+
+    # =================================================================
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 2. 添加启动时权限同步逻辑 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # =================================================================
+    try:
+        logger.info("正在尝试从后端源文件同步权限...")
+        # 手动创建数据库会话和 Service 实例
+        async for session in get_session():
+            try:
+                repo_factory = RepositoryFactory(session)
+                permission_service = PermissionService(repo_factory)
+
+                sync_result = await permission_service.sync_permissions_from_source()
+                logger.info(f"✅ 权限同步完成: {sync_result}")
+            finally:
+                await session.close()
+            break  # 确保只执行一次
+
+    except Exception as e:
+        # 如果同步失败，只记录错误，不阻塞应用启动
+        logger.error(f"❌ 启动时权限同步失败: {e}", exc_info=True)
+    # =================================================================
+
     logger.info("✅ 所有资源初始化完成")
 
     yield
