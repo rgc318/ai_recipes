@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_valida
 from pydantic_core.core_schema import ValidationInfo
 
 from app.config import settings
+from app.core.exceptions import UnauthorizedException
 from app.core.types.common import ModelType, T
 from app.enums.auth_method import AuthMethod
 from app.schemas.role_schemas import RoleRead
@@ -113,12 +114,6 @@ class UserReadWithRoles(UserRead):
 class UserPasswordUpdate(BaseModel):
     old_password: PasswordStr = Field(..., description="当前密码")
     new_password: PasswordStr = Field(..., description="新密码，至少 8 位")
-
-    @model_validator(mode="after")
-    def validate_not_same(self):
-        if self.old_password == self.new_password:
-            raise ValueError("新密码不能和旧密码相同")
-        return self
 
 class CredentialsRequest(BaseModel):
     username: str = Field(..., description="用户名")

@@ -3,8 +3,9 @@ from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.config.config_loader import logger
 from app.api.dependencies.permissions import require_superuser
+from app.core.exceptions import UnauthorizedException
 from app.core.security.security import get_current_user
 from app.db.session import get_session
 from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
@@ -14,7 +15,7 @@ from app.services.file_service import FileService
 from app.services.user_service import UserService
 from app.api.dependencies.services import get_user_service, get_file_service
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
-    UserFilterParams
+    UserFilterParams, UserPasswordUpdate
 from app.schemas.page_schemas import PageResponse
 from app.core.api_response import response_success, response_error, StandardResponse
 from app.core.response_codes import ResponseCodeEnum
@@ -148,7 +149,7 @@ async def link_uploaded_avatar(
         avatar_dto=payload
     )
     return response_success(data=UserRead.model_validate(updated_user), message="头像更新成功")
-@router.put("/me", response_model=StandardResponse[UserRead], summary="更新当前用户信息")
+@router.patch("/me", response_model=StandardResponse[UserRead], summary="更新当前用户信息")
 async def update_my_profile(
     updates: UserUpdateProfile, # 使用受限的更新模型
     service: UserService = Depends(get_user_service),
@@ -156,7 +157,34 @@ async def update_my_profile(
 ):
     """更新当前登录用户自己的个人资料，如昵称、邮箱等。"""
     updated_user = await service.update_profile(current_user.id, updates)
-    return response_success(data=updated_user, message="个人资料更新成功")
+    return response_success(data=UserRead.model_validate(updated_user), message="个人资料更新成功")
+
+@router.patch(
+    "/me/password",
+    response_model=StandardResponse[NoneType],
+    summary="当前用户修改自己的密码"
+)
+async def change_current_user_password(
+    payload: UserPasswordUpdate,
+    current_user: UserContext = Depends(get_current_user),
+    service: UserService = Depends(get_user_service),
+):
+    """
+    验证当前用户的旧密码，并更新为新密码。
+    """
+    try:
+        await service.change_password_with_verification(
+            user_id=current_user.id,
+            old_plain_password=payload.old_password,
+            new_plain_password=payload.new_password
+        )
+        return response_success(data=None, message="密码更新成功")
+    except UnauthorizedException as e:
+        logger.warning(f"密码更新失败：{e}")
+        return response_error(code=ResponseCodeEnum.AUTH_ERROR, message=e.message)
+    except Exception as e:
+        logger.error(f"密码更新失败: {e}")
+        return response_error(code=ResponseCodeEnum.SERVER_ERROR, message=str(e))
 
 
 
