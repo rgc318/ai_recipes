@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.config_loader import logger
 from app.api.dependencies.permissions import require_superuser
-from app.core.exceptions import UnauthorizedException
+from app.core.exceptions import UnauthorizedException, BaseBusinessException
 from app.core.security.security import get_current_user
 from app.db.session import get_session
 from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
@@ -15,7 +15,7 @@ from app.services.file_service import FileService
 from app.services.user_service import UserService
 from app.api.dependencies.services import get_user_service, get_file_service
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
-    UserFilterParams, UserPasswordUpdate
+    UserFilterParams, UserPasswordUpdate, BatchDeletePayload
 from app.schemas.page_schemas import PageResponse
 from app.core.api_response import response_success, response_error, StandardResponse
 from app.core.response_codes import ResponseCodeEnum
@@ -274,14 +274,58 @@ async def update_user(
         user_data: UserUpdate,
         service: UserService = Depends(get_user_service)
 ):
-    updated_user = await service.update_user(user_id, user_data)
-    if not updated_user:
+    try:
+        updated_user = await service.update_user(user_id, user_data)
+        if not updated_user:
+            return response_error(
+                code=ResponseCodeEnum.USER_NOT_FOUND,
+                message="用户更新失败，用户不存在",
+            )
+        return response_success(data=UserReadWithRoles.model_validate(updated_user), message="用户更新成功")
+    except BaseBusinessException as e:
+        logger.error(f"用户更新失败: {e}")
         return response_error(
-            code=ResponseCodeEnum.USER_NOT_FOUND,
-            message="用户更新失败，用户不存在",
+            code=ResponseCodeEnum.SERVER_ERROR,
+            message=e.message,
         )
-    return response_success(data=UserReadWithRoles.model_validate(updated_user), message="用户更新成功")
+    except Exception as e:
+        logger.error(f"用户更新失败: {e}")
+        return response_error(
+            code=ResponseCodeEnum.SERVER_ERROR,
+            message=str(e),
+        )
 
+
+@router.delete(
+    "/batch",
+    summary="批量软删除用户",
+    response_model=StandardResponse[dict],
+    dependencies=[Depends(require_superuser)] # 权限：只有超级管理员才能执行此操作
+)
+async def batch_delete_users(
+    payload: BatchDeletePayload,
+    service: UserService = Depends(get_user_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """
+    接收一个包含用户ID列表的数组，并批量软删除这些用户。
+    会进行安全校验，防止用户删除自己或非超管删除超管。
+    """
+    try:
+        deleted_count = await service.batch_delete_users(
+            user_ids=payload.user_ids,
+            current_user=current_user
+        )
+        return response_success(
+            data={"deleted_count": deleted_count},
+            message=f"成功删除 {deleted_count} 个用户"
+        )
+    except UnauthorizedException as e:
+        logger.warning(f"批量删除权限不足：{e} by {current_user.username}")
+        return response_error(code=ResponseCodeEnum.AUTH_ERROR, message=str(e))
+    except Exception as e:
+        logger.error(f"批量删除用户失败: {e}")
+        return response_error(code=ResponseCodeEnum.SERVER_ERROR, message="批量删除操作失败")
 
 # === Soft Delete User ===
 @router.delete(
@@ -297,6 +341,8 @@ async def delete_user(user_id: UUID, service: UserService = Depends(get_user_ser
             message="用户删除失败，用户不存在",
         )
     return response_success(data=None, message="用户已删除")
+
+
 
 # 【新增】在管理员接口部分添加
 @router.patch(
