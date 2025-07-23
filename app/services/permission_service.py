@@ -76,7 +76,7 @@ class PermissionService(BaseService):
         # 对于精确匹配的字段，可以直接传递
         if 'group' in repo_filters and repo_filters['group']:
             # 明确指定为精确匹配
-            repo_filters['group__eq'] = repo_filters.pop('group')
+            repo_filters['group__like'] = repo_filters.pop('group')
 
         # 3. 调用 Repository 层的通用分页方法
         #    注意：PermissionRepository 继承了 BaseRepository，因此拥有 get_paged_list 方法
