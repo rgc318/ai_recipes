@@ -154,3 +154,6 @@ class UserFilterParams(BaseModel):
     is_superuser: Optional[bool] = Field(None, description="按是否为超级用户过滤")
     is_locked: Optional[bool] = Field(None, description="按是否锁定过滤")
     role_ids: Optional[List[UUID]] = Field(None, description="根据关联的角色ID列表过滤")
+
+class BatchDeletePayload(BaseModel):
+    user_ids: List[UUID] = Field(..., min_length=1, description="要删除的用户ID列表")

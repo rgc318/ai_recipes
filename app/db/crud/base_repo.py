@@ -8,13 +8,14 @@ from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime, timezone
 from math import ceil
-from sqlalchemy import asc, desc, or_, func, update
+from sqlalchemy import asc, desc, or_, func, update, delete
 import logging
 import time
 
 from app.core.types.common import ModelType
 from app.db.repo_registrar import RepositoryRegistrar
 from app.metrics.repo_metrics import repository_sql_duration
+from app.models import UserRole
 from app.schemas.page_schemas import PageResponse
 
 
@@ -135,6 +136,19 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
     # 数据删除方法 (Delete)
     # ==========================
 
+    async def clear_roles_by_user_ids(self, user_ids: list[UUID]) -> int:
+        """
+        根据用户ID列表，物理删除 user_role 表中的关联记录。
+        这是硬删除，因为关联本身没有“软删除”的状态。
+        """
+        if not user_ids:
+            return 0
+
+        # 直接使用 delete() 函数来构建 DELETE 语句
+        stmt = delete(UserRole).where(UserRole.user_id.in_(user_ids))
+        result = await self.db.execute(stmt)
+        return result.rowcount
+
     async def delete(self, db_obj: ModelType) -> None:
         """
         从数据库中物理删除一个对象。
@@ -158,6 +172,32 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         await self.db.refresh(db_obj)
         return db_obj
 
+    async def soft_delete_by_ids(self, ids: List[UUID]) -> int:
+        """
+        根据ID列表，高效地批量软删除对象。
+
+        Returns:
+            受影响的行数 (即成功删除的记录数量)。
+        """
+        if not ids:
+            return 0
+
+        update_values = {
+            "is_deleted": True,
+            "deleted_at": datetime.now(timezone.utc)
+        }
+        # 自动更新 updated_at 字段 (如果存在)
+        if hasattr(self.model, "updated_at"):
+            update_values["updated_at"] = datetime.now(timezone.utc)
+
+        stmt = (
+            update(self.model)
+            .where(self.model.id.in_(ids))
+            .values(**update_values)
+        )
+        result = await self.db.execute(stmt)
+        # result.rowcount 返回受此 UPDATE 语句影响的行数
+        return result.rowcount
     # ==========================
     # 数据查询方法 (Query) - 这部分基本无需改动
     # ==========================

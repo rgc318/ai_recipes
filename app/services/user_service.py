@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import List, Optional, Dict, Any
 
 from fastapi import Depends, UploadFile
+from sqlalchemy import delete
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import settings
@@ -10,9 +11,10 @@ from app.core.exceptions import UserNotFoundException, NotFoundException, Alread
     ConcurrencyConflictException, UnauthorizedException
 from app.db.crud.file_record_repo import FileRecordRepository
 from app.db.repository_factory_auto import RepositoryFactory
-from app.models.user import User, Role
+from app.models.user import User, Role, UserRole
 from app.schemas.file_record_schemas import FileRecordCreate
 from app.schemas.file_schemas import AvatarLinkDTO
+from app.schemas.user_context import UserContext
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile, UserRead
 from app.core.security.password_utils import get_password_hash, verify_password
 from app.db.crud.user_repo import UserRepository
@@ -221,6 +223,11 @@ class UserService(BaseService):
             if await self.user_repo.get_by_email(new_email):
                 raise AlreadyExistsException("邮箱已被注册")
 
+        new_phone = update_data.get("phone")
+        if new_phone and new_phone != user_to_update.phone:
+            if await self.user_repo.get_by_phone(new_phone):
+                raise AlreadyExistsException("该手机号已被注册")
+
         # 4. 【内存中修改】分离并处理特殊字段
         # 处理密码
         if "password" in update_data and update_data["password"]:
@@ -262,12 +269,50 @@ class UserService(BaseService):
 
         return user_to_update
 
-    async def delete_user(self, user_id: UUID) -> None:
+
+
+    async def delete_user(self, user_id: UUID) -> bool:
         user = await self.get_user_by_id(user_id)
+        if not user:
+            raise UserNotFoundException()
+
         try:
+            # 1. 先清理关联的角色
+            await self.user_repo.clear_roles_by_user_ids([user_id])
+
             await self.user_repo.soft_delete(user)
             await self.user_repo.commit()
+            return True
         except Exception as e:
+            self.logger.error(f"删除用户失败：{e}")
+            await self.user_repo.rollback()
+            return False
+
+    async def batch_delete_users(self, user_ids: List[UUID], current_user: UserContext) -> int:
+        """
+        批量删除用户，并包含核心业务安全校验。
+        """
+        # 1. 业务规则校验：禁止用户删除自己
+        if current_user.id in user_ids:
+            raise UnauthorizedException("不能删除自己的账户")
+
+        # 2. 业务规则校验：非超级管理员不能删除超级管理员
+        if not current_user.is_superuser:
+            # 先查询出将要被删除的用户信息
+            users_to_delete = await self.user_repo.get_by_ids(user_ids)
+            for user in users_to_delete:
+                if user.is_superuser:
+                    raise UnauthorizedException(f"权限不足，无法删除超级管理员用户: {user.username}")
+
+        # 3. 执行数据库操作
+        try:
+            await self.user_repo.clear_roles_by_user_ids(user_ids)
+            # 调用我们在 Repository 中创建的新方法
+            deleted_count = await self.user_repo.soft_delete_by_ids(user_ids)
+            await self.user_repo.commit()
+            return deleted_count
+        except Exception as e:
+            self.logger.error(f"批量删除用户失败：{e}")
             await self.user_repo.rollback()
             raise e
 
