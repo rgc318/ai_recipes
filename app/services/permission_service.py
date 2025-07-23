@@ -49,6 +49,14 @@ class PermissionService(BaseService):
             raise NotFoundException(f"代码为 '{code}' 的权限未找到")
         return permission
 
+    async def get_all_permissions(self) -> List[Permission]:
+        """
+        获取所有权限列表，用于下拉框等场景。
+        内置一个合理的安全上限（例如1000），防止性能问题。
+        """
+        # 调用继承自 BaseRepository 的通用 list 方法
+        return await self.permission_repo.list(skip=0, limit=1000)
+
     async def page_list_permissions(
             self,
             page: int = 1,

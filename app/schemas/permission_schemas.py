@@ -72,4 +72,14 @@ class PermissionFilterParams(BaseModel):
     """
     group: Optional[str] = None
     # 统一将模糊搜索字段命名为 search
-    search: Optional[str] = None 
+    search: Optional[str] = None
+
+class PermissionSelectorRead(BaseModel):
+    """
+    专门用于选择器（如下拉框）的超轻量级权限模型。
+    只包含前端选择时必要的 id 和 name 字段。
+    """
+    id: UUID
+    name: str
+
+    model_config = {"from_attributes": True}

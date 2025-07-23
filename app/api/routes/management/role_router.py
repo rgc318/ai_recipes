@@ -5,15 +5,17 @@ from fastapi import APIRouter, Depends, status, Query, Body
 
 from app.api.dependencies.services import get_role_service
 from app.api.dependencies.permissions import require_superuser
+from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
+from app.core.response_codes import ResponseCodeEnum
 from app.services.role_service import RoleService
 from app.schemas.role_schemas import (
     RoleCreate,
     RoleUpdate,
     RoleRead,
     RoleReadWithPermissions,
-    RolePermissionsUpdate, RoleSelectorRead  # 新增：用于批量更新权限的请求模型
+    RolePermissionsUpdate, RoleSelectorRead, RoleFilterParams  # 新增：用于批量更新权限的请求模型
 )
-from app.core.api_response import response_success, StandardResponse
+from app.core.api_response import response_success, StandardResponse, response_error
 from app.schemas.page_schemas import PageResponse
 
 # 同样，使用全局依赖保护所有接口
@@ -38,30 +40,34 @@ async def get_roles_for_selector(
 
 
 @router.get(
-    "/",  # 优化：路径使用根路径 '/' 更符合 RESTful 风格
-    response_model=StandardResponse[PageResponse[RoleRead]],
+    "/",
+    # 优化：通常列表返回的角色信息也应包含权限，便于前端展示
+    response_model=StandardResponse[PageResponse[RoleReadWithPermissions]],
     summary="分页、排序和过滤角色列表"
 )
 async def list_roles_paginated(
+    service: RoleService = Depends(get_role_service),
     page: int = Query(1, ge=1, description="页码"),
     per_page: int = Query(10, ge=1, le=100, description="每页数量"),
-    order_by: str = Query("created_at:desc", description="排序字段"),
-    name: Optional[str] = Query(None, description="按角色名模糊搜索"),
-    code: Optional[str] = Query(None, description="按角色代码精确过滤"),
-    service: RoleService = Depends(get_role_service)
+    # 统一排序参数
+    sort: Optional[str] = Query("-created_at", description="排序字段，逗号分隔，-号表示降序"),
+    # 使用 Depends 注入过滤器参数
+    filter_params: RoleFilterParams = Depends(),
 ):
     """
-    获取角色的分页列表，并支持按名称搜索和按代码过滤。
+    获取角色的分页列表，支持动态过滤和排序。
     - **需要超级管理员权限。**
+    - **search**: 按角色名称或代码进行模糊搜索。
     """
+    sort_by_list = sort.split(',') if sort else None
+    filters = filter_params.model_dump(exclude_unset=True)
+
     page_data = await service.page_list_roles(
         page=page,
         per_page=per_page,
-        order_by=order_by,
-        name=name,
-        code=code
+        sort_by=sort_by_list,
+        filters=filters
     )
-    # 修复：直接返回服务层构建好的 PageResponse 对象
     return response_success(data=page_data)
 
 
@@ -104,7 +110,7 @@ async def get_role_details(
 
 @router.put(
     "/{role_id}",
-    response_model=StandardResponse[RoleReadWithPermissions], # 优化：更新后返回带权限的角色信息
+    response_model=StandardResponse[RoleReadWithPermissions],
     summary="更新角色信息（含权限）"
 )
 async def update_role(
@@ -114,15 +120,24 @@ async def update_role(
 ):
     """
     更新一个角色的信息。
-    这个接口功能强大，可以同时更新角色的基本信息（名称、代码）和其关联的所有权限。
-    - **需要超级管理员权限。**
-    - 如果提供了 `permission_ids` 列表，它将覆盖该角色现有的所有权限。
+    ...
     """
-    updated_role = await service.update_role(role_id, role_in)
-    return response_success(
-        data=RoleReadWithPermissions.model_validate(updated_role),
-        message="角色更新成功"
-    )
+    try:
+        updated_role = await service.update_role(role_id, role_in)
+        return response_success(
+            data=RoleReadWithPermissions.model_validate(updated_role),
+            message="角色更新成功"
+        )
+    # 捕获具体的业务异常，返回更友好的错误信息
+    except (NotFoundException, AlreadyExistsException, ConcurrencyConflictException) as e:
+        # 使用 e.message 可以将服务层定义的具体错误原因（如“角色代码已存在”）返回给前端
+        return response_error(code=e.code, message=e.message)
+    except Exception as e:
+        # 捕获所有其他未知异常，防止敏感信息泄露
+        # 这里的日志记录很重要
+        # logger.error(f"更新角色 {role_id} 时发生未知错误: {e}")
+        return response_error(code=ResponseCodeEnum.SERVER_ERROR, message="服务器内部错误")
+
 
 
 @router.delete(
@@ -138,7 +153,11 @@ async def delete_role(
     软删除一个角色。
     - **需要超级管理员权限。**
     """
-    await service.delete_role(role_id)
+    try:
+        await service.delete_role(role_id)
+        return response_success(message="角色删除")
+    except Exception as e:
+        return response_error(code=ResponseCodeEnum.SERVER_ERROR, message=str(e))
 
 
 # --- 角色与权限的关联管理 ---
