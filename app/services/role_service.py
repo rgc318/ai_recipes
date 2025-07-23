@@ -12,6 +12,7 @@ from app.db.crud.role_repo import RoleRepository
 from app.db.crud.permission_repo import PermissionRepository
 from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
 from app.services._base_service import BaseService
+from app.config.config_loader import logger
 
 
 class RoleService(BaseService):
@@ -86,6 +87,7 @@ class RoleService(BaseService):
             eager_loads=eager_loading_options,  # 传入预加载选项
         )
 
+        logger.info("获取角色分页列表，结果：{}".format(paged_roles_orm))
         # 4. 将 ORM 对象转换为 Pydantic Read 模型
         items_dto = [RoleReadWithPermissions.model_validate(r) for r in paged_roles_orm.items]
 
