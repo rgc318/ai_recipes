@@ -107,7 +107,7 @@ class UserReadWithRoles(UserRead):
     主要用于后台管理的用户列表展示。
     """
     roles: List[RoleRead] = []
-    permissions: Set[str] = set()  # <-- 新增这一行
+    permissions: List[str] = set()  # <-- 新增这一行
 # ==========================
 # 🔐 用户修改密码模型
 # ==========================
