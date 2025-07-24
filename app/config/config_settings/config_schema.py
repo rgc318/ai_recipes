@@ -1,6 +1,7 @@
 from typing import Dict, Optional, Literal, Union, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
 
 class MinioS3Params(BaseModel):
     """MinIO 或 AWS S3 类型的客户端参数"""
@@ -52,20 +53,58 @@ class SecuritySettings(BaseModel):
     fake_password_hash: str = "$2b$12$JdHtJOlkPFwyxdjdygEzPOtYmdQF5/R5tHxw5Tq8pxjubyLqdIX5i"
     testing: bool = False
 
-class RedisConfig(BaseModel):
-    host: str = "localhost"
-    port: int = 6379
-    db: int = 0
-    password: str = ""
+
+class SingleRedisConfig(BaseModel):
+    """
+    【全新升级版】定义单个 Redis 客户端的配置模型。
+    同时支持直接提供 URL 或提供独立参数进行拼接。
+    """
+    # 模式一：直接提供 URL (优先级更高)
+    url: Optional[str] = Field(None, description="完整的Redis连接URL，如果提供，将优先使用此配置。")
+
+    # 模式二：提供独立参数
+    host: Optional[str] = Field("localhost", description="Redis 主机 (当 url 未提供时使用)")
+    port: Optional[int] = Field(6379, description="Redis 端口 (当 url 未提供时使用)")
+    db: Optional[int] = Field(0, description="数据库编号 (当 url 未提供时使用)")
+    password: Optional[str] = Field(None, description="密码 (当 url 未提供时使用)")
+
+    # 其他非连接参数
     max_connections: int = 10
     socket_timeout: int = 5
     socket_connect_timeout: int = 5
     serializer: str = "json"
 
-    @property
-    def url(self):
+    # 用于存储最终生成的 URL，供 Factory 使用
+    _final_url: str = ""
+
+    @model_validator(mode='after')
+    def validate_and_build_url(self) -> 'SingleRedisConfig':
+        """
+        Pydantic 校验器，在字段校验后执行。
+        用于检查配置并生成最终的连接 URL。
+        """
+        if self.url:
+            # 如果 URL 已提供，直接使用它
+            self._final_url = self.url
+            return self
+
+        # 如果 URL 未提供，则必须有 host 和 port
+        if not self.host or self.port is None:
+            raise ValueError("If 'url' is not provided, 'host' and 'port' must be set.")
+
+        # 自动拼接 URL
         auth_part = f":{self.password}@" if self.password else ""
-        return f"redis://{auth_part}{self.host}:{self.port}/{self.db}"
+        self._final_url = f"redis://{auth_part}{self.host}:{self.port}/{self.db or 0}"
+
+        return self
+
+
+class RedisConfig(BaseModel):
+    """
+    主 Redis 配置模型，容纳一个由多个 SingleRedisConfig 组成的字典。
+    """
+    clients: Dict[str, SingleRedisConfig]
+
 
 class StorageProfileConfig(BaseModel):
     """单个存储策略的配置"""
