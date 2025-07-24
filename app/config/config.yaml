@@ -38,14 +38,22 @@ security_settings:
   user_lockout_time: 1  # 单位：小时
 
 redis:
-  host: "192.168.31.229"
-  port: 26739
-  db: 0
-  password: "${REDIS_PASSWORD}"
-  max_connections: 10
-  socket_timeout: 5
-  socket_connect_timeout: 5
-  serializer: "json"
+  clients:
+    # 新增 "default:" 层级，作为我们第一个客户端的名字
+    default:
+      # 您可以选择使用独立参数的模式...
+      host: "192.168.31.229"
+      port: 26739
+      db: 0
+      password: "${REDIS_PASSWORD}"
+      # ... 或者，更推荐直接使用我们之前设计好的 url 模式
+      # url: "redis://${REDIS_PASSWORD}@192.168.31.229:26739/0"
+
+      # 其他参数保持不变
+      max_connections: 10
+      socket_timeout: 5
+      socket_connect_timeout: 5
+      serializer: "json"
 
 
 # 【修改二】新增 storage_clients 部分，定义所有可用的存储连接

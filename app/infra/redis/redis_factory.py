@@ -23,7 +23,7 @@ class RedisFactory:
         for name, config in settings.redis.clients.items():
             try:
                 pool = aioredis.ConnectionPool.from_url(
-                    config.url,
+                    config._final_url,
                     max_connections=config.max_connections,
                     socket_timeout=config.socket_timeout,
                     socket_connect_timeout=config.socket_connect_timeout,
@@ -58,5 +58,33 @@ class RedisFactory:
             logger.info(f"🔌 Redis client '{name}' connection closed.")
         self._clients.clear()
 
+    async def health_check(self, name: str = 'default') -> bool:
+        """
+        对指定名称的 Redis 客户端进行健康检查。
+        """
+        try:
+            client = self.get_client(name)
+            await client.ping()
+            logger.info(f"Redis client '{name}' health check successful.")
+            return True
+        except Exception as e:
+            logger.error(f"Redis client '{name}' health check failed: {e}")
+            return False
+
+    def get_pool_stats(self, name: str = 'default') -> dict:
+        """
+        获取指定名称的 Redis 客户端的连接池状态。
+        """
+        try:
+            client = self.get_client(name)
+            pool = client.connection_pool
+            return {
+                "max_connections": pool.max_connections,
+                "in_use_connections": len(pool._in_use_connections),
+                "available_connections": len(pool._available_connections),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get pool stats for Redis client '{name}': {e}")
+            return {}
 # 创建一个全局的工厂实例，以便在整个应用中共享
 redis_factory = RedisFactory()

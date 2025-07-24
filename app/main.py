@@ -11,6 +11,7 @@ from app.core.logger import logger
 from app.core.exceptions import BaseBusinessException, UnauthorizedException
 from app.core.response_codes import ResponseCodeEnum
 from app.config.settings import settings
+from app.infra.redis.redis_factory import redis_factory
 from app.services.permission_service import PermissionService
 from app.infra.redis.redis_client import RedisClient
 
@@ -22,15 +23,8 @@ async def lifespan(app: FastAPI):
     # 初始化数据库
     await create_db_and_tables()
 
-    # 初始化 Redis
-    redis_cfg = settings.redis
-    await RedisClient.init(
-        redis_url=redis_cfg.url,
-        max_connections=redis_cfg.max_connections,
-        socket_timeout=redis_cfg.socket_timeout,
-        socket_connect_timeout=redis_cfg.socket_connect_timeout,
-        serializer=redis_cfg.serializer,
-    )
+    # 初始化 Redis (调用工厂的方法)
+    await redis_factory.init_clients()
 
     # =================================================================
     # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 2. 添加启动时权限同步逻辑 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
@@ -59,22 +53,12 @@ async def lifespan(app: FastAPI):
     yield
 
     # 应用关闭，释放资源
-    await RedisClient.close()
+    await redis_factory.close_clients()
     logger.info("🛑 应用已关闭，Redis 已断开连接")
 
 
 app = FastAPI(title="AI Recipe Project", lifespan=lifespan)
 
-@app.on_event("startup")
-async def startup_event():
-    redis_cfg = settings.redis
-    await RedisClient.init(
-        redis_url=redis_cfg.url,
-        max_connections=redis_cfg.max_connections,
-        socket_timeout=redis_cfg.socket_timeout,
-        socket_connect_timeout=redis_cfg.socket_connect_timeout,
-        serializer=redis_cfg.serializer,
-    )
 @app.exception_handler(BaseBusinessException)
 async def business_exception_handler(request: Request, exc: BaseBusinessException):
     logger.warning(f"Business Exception | code: {exc.code}, message: {exc.message}, path: {request.url.path}")
