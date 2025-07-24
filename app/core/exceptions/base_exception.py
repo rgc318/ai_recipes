@@ -47,6 +47,12 @@ class AlreadyExistsException(BaseBusinessException):
     """
     def __init__(self, message: str = "资源已存在"):
         super().__init__(ResponseCodeEnum.ALREADY_EXISTS, message=message)
+class PermissionDeniedException(BaseBusinessException):
+    """
+    权限不足
+    """
+    def __init__(self, message: str = "权限不足"):
+        super().__init__(ResponseCodeEnum.FORBIDDEN, message=message)
 
 class FileException(BaseBusinessException):
     """
