@@ -6,10 +6,10 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, ValidationError, BaseModel
+from pydantic import Field, ValidationError
 
 from app.core.logger import logger
-from app.config.config_loader import load_config_file
+from app.config.config_settings.config_loader import load_config_file
 
 # 项目根目录，定义为当前文件的上两级目录
 BASE_DIR = Path(__file__).resolve().parent.parent.parent

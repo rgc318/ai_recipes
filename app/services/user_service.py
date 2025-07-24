@@ -3,23 +3,22 @@ from uuid import UUID
 from typing import List, Optional, Dict, Any
 
 from fastapi import Depends, UploadFile
-from sqlalchemy import delete
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import settings
 from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException, \
     ConcurrencyConflictException, UnauthorizedException
-from app.db.crud.file_record_repo import FileRecordRepository
-from app.db.repository_factory_auto import RepositoryFactory
-from app.models.user import User, Role, UserRole
+from app.repo.crud.file_record_repo import FileRecordRepository
+from app.infra.db.repository_factory_auto import RepositoryFactory
+from app.models.user import User
 from app.schemas.file_record_schemas import FileRecordCreate
 from app.schemas.file_schemas import AvatarLinkDTO
 from app.schemas.user_context import UserContext
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile, UserRead
+from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile
 from app.core.security.password_utils import get_password_hash, verify_password
-from app.db.crud.user_repo import UserRepository
-from app.db.crud.role_repo import RoleRepository
-from app.db.crud.base_repo import PageResponse
+from app.repo.crud.user_repo import UserRepository
+from app.repo.crud.role_repo import RoleRepository
+from app.repo.crud.base_repo import PageResponse
 from app.services._base_service import BaseService
 from app.services.file_record_service import FileRecordService
 from app.services.file_service import FileService

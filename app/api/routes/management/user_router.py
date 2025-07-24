@@ -2,12 +2,10 @@ from types import NoneType
 from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.config.config_loader import logger
+from app.config.config_settings.config_loader import logger
 from app.api.dependencies.permissions import require_superuser
 from app.core.exceptions import UnauthorizedException, BaseBusinessException
 from app.core.security.security import get_current_user
-from app.db.session import get_session
 from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
     PresignedPolicyRequest
 from app.schemas.user_context import UserContext

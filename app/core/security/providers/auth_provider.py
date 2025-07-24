@@ -3,10 +3,8 @@ from datetime import timedelta
 from typing import TypeVar, Generic, Optional
 
 from app.utils.jwt_utils import create_access_token
-from app.config.settings import settings
 from app.schemas.user_schemas import PrivateUser
-from app.db.get_repo_factory import RepositoryFactory
-from app.enums.auth_method import AuthMethod
+from app.infra.db.get_repo_factory import RepositoryFactory
 
 T = TypeVar("T")  # 泛型参数：用于接受各种认证请求数据，如密码、验证码等
 

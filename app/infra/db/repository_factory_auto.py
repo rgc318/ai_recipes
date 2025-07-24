@@ -1,9 +1,9 @@
-# app/db/repository_factory_auto.py
+# app/repo/repository_factory_auto.py
 import asyncio
 from typing import Optional, Any, Type, TypeVar, AsyncGenerator, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
-from app.db.crud.base_repo import BaseRepository
+from app.repo.crud.base_repo import BaseRepository
 from app.core.request_scope import get_request_scope
 # =====================
 # 类型定义

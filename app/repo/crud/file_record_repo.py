@@ -1,7 +1,7 @@
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.crud.base_repo import BaseRepository
+from app.repo.crud.base_repo import BaseRepository
 from app.models.file_record import FileRecord
 from app.schemas.file_record_schemas import FileRecordCreate, FileRecordUpdate
 

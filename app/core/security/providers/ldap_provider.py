@@ -7,7 +7,7 @@ from sqlalchemy.orm.session import Session
 from app.core import root_logger
 from app.core.config import get_app_settings
 from app.core.security.providers.credentials_provider import CredentialsProvider
-from app.db.models.users.users import AuthMethod
+from app.repo.models.users.users import AuthMethod
 from app.repos.all_repositories import get_repositories
 from app.schema.user.auth import CredentialsRequest
 from app.schema.user.user import PrivateUser

@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import timedelta
 from typing import Optional
 
 from app.core.logger import get_logger
@@ -6,7 +6,7 @@ from app.config import settings
 from app.core.security.hasher import get_hasher
 from app.core.security.providers.auth_provider import AuthProvider
 from app.core.exceptions import UserLockedOutException
-from app.db.repository_factory_auto import RepositoryFactory
+from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.schemas.user_schemas import CredentialsRequest, PrivateUser
 from app.services.user_service import UserService
 from app.enums.auth_method import AuthMethod

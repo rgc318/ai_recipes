@@ -1,13 +1,10 @@
 from typing import Optional, Sequence, List
 from uuid import UUID
 
-from fastapi import Depends
-
-from app.db.repository_factory_auto import RepositoryFactory
-from app.db.get_repo_factory import get_repository_factory
+from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.recipe import Recipe
 from app.schemas.recipe_schemas import RecipeCreate, RecipeUpdate
-from app.db.crud.recipe_repo import RecipeRepository
+from app.repo.crud.recipe_repo import RecipeRepository
 from app.services._base_service import BaseService
 
 

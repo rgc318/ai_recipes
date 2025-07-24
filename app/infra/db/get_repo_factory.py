@@ -1,9 +1,8 @@
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.logger import logger
-from app.db.session import get_session
-from app.db.repository_factory_auto import RepositoryFactory
+from app.infra.db.session import get_session
+from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.core.request_scope import get_request_scope
 
 
