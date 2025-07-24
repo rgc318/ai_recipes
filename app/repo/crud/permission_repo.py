@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.crud.base_repo import BaseRepository
+from app.repo.crud.base_repo import BaseRepository
 from app.models.user import Permission
 from app.schemas.permission_schemas import PermissionCreate, PermissionUpdate
 

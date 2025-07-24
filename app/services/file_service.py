@@ -2,7 +2,7 @@ import asyncio
 import os
 from asyncio import Semaphore
 from datetime import datetime
-from typing import BinaryIO, List, Literal, Any, Coroutine
+from typing import BinaryIO, List
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
@@ -12,10 +12,8 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from app.core.exceptions import FileException
 from app.core.logger import logger
-from app.core.storage.minio_client import MinioClient
-from app.core.storage.storage_factory import StorageFactory
-from app.core.storage.storage_interface import StorageClientInterface
-from app.schemas.file_record_schemas import FileRecordRead
+from app.infra.storage.storage_factory import StorageFactory
+from app.infra.storage.storage_interface import StorageClientInterface
 from app.schemas.file_schemas import UploadResult, PresignedUploadURL, PresignedUploadPolicy
 
 

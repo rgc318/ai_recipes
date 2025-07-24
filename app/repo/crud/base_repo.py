@@ -1,21 +1,17 @@
 import operator
 from typing import TypeVar, Generic, Optional, Type, List, Union, Dict, Any
 
-from sqlalchemy.orm import selectinload
-from sqlmodel import SQLModel, select
+from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime, timezone
 from math import ceil
-from sqlalchemy import asc, desc, or_, func, update, delete
+from sqlalchemy import asc, desc, or_, func, update
 import logging
-import time
 
 from app.core.types.common import ModelType
-from app.db.repo_registrar import RepositoryRegistrar
-from app.metrics.repo_metrics import repository_sql_duration
-from app.models import UserRole
+from app.infra.db.repo_registrar import RepositoryRegistrar
 from app.schemas.page_schemas import PageResponse
 
 
@@ -327,7 +323,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
     #
     #         # 2. 基于上面的查询，构建一个高效的count子查询
     #         count_query = select(func.count()).select_from(query.subquery())
-    #         total_result = await self.db.execute(count_query)
+    #         total_result = await self.repo.execute(count_query)
     #         total = total_result.scalar_one() or 0
     #
     #         # 3. 对主查询应用排序和分页

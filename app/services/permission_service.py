@@ -4,12 +4,12 @@ from uuid import UUID
 
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.config.permissions_enum import PERMISSIONS_CONFIG
-from app.db.repository_factory_auto import RepositoryFactory
+from app.config.permission_config.permissions_enum import PERMISSIONS_CONFIG
+from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.user import Permission
 from app.schemas.page_schemas import PageResponse
 from app.schemas.permission_schemas import PermissionCreate, PermissionUpdate, PermissionRead
-from app.db.crud.permission_repo import PermissionRepository
+from app.repo.crud.permission_repo import PermissionRepository
 from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
 from app.services._base_service import BaseService
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models.user import User, Role, UserRole
 from app.schemas.user_schemas import UserCreate, UserUpdate, UserReadWithRoles
 from app.schemas.page_schemas import PageResponse
-from app.db.crud.base_repo import BaseRepository
+from app.repo.crud.base_repo import BaseRepository
 
 class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     def __init__(self, db: AsyncSession, context: Optional[dict] = None):
@@ -96,7 +96,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     #     # 在应用了所有过滤和JOIN之后，但在应用分页和排序之前，进行计数
     #     # 使用 subquery 来确保 count 的正确性
     #     count_query = select(func.count()).select_from(query.subquery())
-    #     total_result = await self.db.execute(count_query)
+    #     total_result = await self.repo.execute(count_query)
     #     total = total_result.scalar_one()
     #
     #     if total == 0:
@@ -108,7 +108,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     #     paginated_ids_query = self.apply_ordering(paginated_ids_query, order_by)
     #     paginated_ids_query = paginated_ids_query.offset((page - 1) * per_page).limit(per_page)
     #
-    #     paginated_ids_result = await self.db.execute(paginated_ids_query)
+    #     paginated_ids_result = await self.repo.execute(paginated_ids_query)
     #     user_ids_for_page = paginated_ids_result.scalars().all()
     #
     #     if not user_ids_for_page:
@@ -129,7 +129,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     #     # 重新应用排序，以保证最终结果的顺序与分页ID的顺序一致
     #     final_query = self.apply_ordering(final_query, order_by)
     #
-    #     items_result = await self.db.execute(final_query)
+    #     items_result = await self.repo.execute(final_query)
     #     # 使用 .unique() 来确保即使JOIN导致了重复行，也只返回唯一的ORM对象
     #     items = items_result.unique().scalars().all()
     #

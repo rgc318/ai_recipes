@@ -26,7 +26,7 @@ from mealie.schema.response.pagination import (
 from mealie.schema.response.query_filter import QueryFilterBuilder
 from mealie.schema.response.query_search import SearchFilter
 
-from app.db._utils import NOT_SET, NotSet
+from app.infra.db._utils import NOT_SET, NotSet
 
 
 class RepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase]:
@@ -416,8 +416,8 @@ class RepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase]:
             return query
 
         elif request_query.order_by == "random":
-            # randomize outside of database, since not all db's can set random seeds
-            # this solution is db-independent & stable to paging
+            # randomize outside of database, since not all repo's can set random seeds
+            # this solution is repo-independent & stable to paging
             temp_query = query.with_only_columns(self.model.id)
             allids = self.session.execute(temp_query).scalars().all()  # fast because id is indexed
             if not allids:

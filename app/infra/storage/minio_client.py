@@ -1,4 +1,3 @@
-import os
 import json
 from abc import ABC
 from typing import BinaryIO, List, Dict, Optional, Any
@@ -6,11 +5,10 @@ from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 import boto3
 
-from app.config.settings import settings
 from app.core.exceptions import FileException
 from app.core.logger import logger
-from app.config.config_schema import MinioClientConfig
-from app.core.storage.storage_interface import StorageClientInterface
+from app.config.config_settings.config_schema import MinioClientConfig
+from app.infra.storage.storage_interface import StorageClientInterface
 from app.utils.url_builder import build_public_storage_url
 
 

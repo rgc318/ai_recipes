@@ -2,14 +2,14 @@ import threading
 from typing import Dict
 
 from app.config.settings import settings
-from app.config.config_schema import (  # 从您的 schemas 文件中导入
+from app.config.config_settings.config_schema import (  # 从您的 schemas 文件中导入
     StorageProfileConfig,
     MinioClientConfig,
     AzureClientConfig,  # 即使尚未实现，也为未来做准备
 )
 from app.core.logger import logger
-from app.core.storage.storage_interface import StorageClientInterface
-from app.core.storage.minio_client import MinioClient
+from app.infra.storage.storage_interface import StorageClientInterface
+from app.infra.storage.minio_client import MinioClient
 
 
 # 导入未来可能有的其他客户端

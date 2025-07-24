@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.crud.base_repo import BaseRepository
+from app.repo.crud.base_repo import BaseRepository
 from app.models.user import Role, Permission
 from app.schemas.role_schemas import RoleCreate, RoleUpdate
 

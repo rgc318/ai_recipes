@@ -1,4 +1,4 @@
-from app.config.config_schema import AppConfig
+from app.config.config_settings.config_schema import AppConfig
 from app.config.settings import settings
 from app.core.logger import get_logger
 

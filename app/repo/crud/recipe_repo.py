@@ -7,7 +7,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.crud.base_repo import BaseRepository
+from app.repo.crud.base_repo import BaseRepository
 from app.models.recipe import (
     Recipe,
     RecipeIngredient,

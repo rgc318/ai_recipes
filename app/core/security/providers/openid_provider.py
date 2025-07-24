@@ -7,7 +7,7 @@ from app.core import root_logger
 from app.core.config import get_app_settings
 from app.core.exceptions import MissingClaimException
 from app.core.security.providers.auth_provider import AuthProvider
-from app.db.models.users.users import AuthMethod
+from app.repo.models.users.users import AuthMethod
 from app.repos.all_repositories import get_repositories
 
 

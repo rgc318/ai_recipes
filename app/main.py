@@ -4,15 +4,15 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.security.middleware import AuditMiddleware
-from app.db.repository_factory_auto import RepositoryFactory
-from app.db.session import create_db_and_tables, get_session
+from app.infra.db.repository_factory_auto import RepositoryFactory
+from app.infra.db.session import create_db_and_tables, get_session
 from contextlib import asynccontextmanager
 from app.core.logger import logger
 from app.core.exceptions import BaseBusinessException, UnauthorizedException
 from app.core.response_codes import ResponseCodeEnum
 from app.config.settings import settings
 from app.services.permission_service import PermissionService
-from app.utils.redis_client import RedisClient
+from app.infra.redis.redis_client import RedisClient
 
 
 @asynccontextmanager

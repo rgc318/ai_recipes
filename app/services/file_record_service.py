@@ -1,8 +1,8 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from app.db.repository_factory_auto import RepositoryFactory
-from app.db.crud.file_record_repo import FileRecordRepository
+from app.infra.db.repository_factory_auto import RepositoryFactory
+from app.repo.crud.file_record_repo import FileRecordRepository
 from app.models.file_record import FileRecord
 from app.schemas.file_record_schemas import FileRecordCreate, FileRecordUpdate, FileRecordRead
 from app.schemas.page_schemas import PageResponse

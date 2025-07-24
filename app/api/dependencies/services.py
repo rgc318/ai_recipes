@@ -2,7 +2,7 @@
 from fastapi import Depends
 
 
-from app.core.storage.storage_factory import storage_factory
+from app.infra.storage.storage_factory import storage_factory
 from app.services.file_record_service import FileRecordService
 from app.services.file_service import FileService
 from app.services.permission_service import PermissionService
@@ -10,7 +10,7 @@ from app.services.role_service import RoleService
 from app.services.user_service import UserService
 from app.services.recipe_service import RecipeService
 from app.services.auth_service import AuthService
-from app.db.get_repo_factory import get_repository_factory, RepositoryFactory
+from app.infra.db.get_repo_factory import get_repository_factory, RepositoryFactory
 
 def get_user_service(
     repo_factory: RepositoryFactory = Depends(get_repository_factory),

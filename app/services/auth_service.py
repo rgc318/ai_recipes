@@ -1,21 +1,20 @@
 import datetime
-from typing import Type, Any, Coroutine
+from typing import Type, Any
 from uuid import UUID
 from datetime import datetime, timedelta
 
-from fastapi import HTTPException
 from pydantic import BaseModel
 
-from app.db.repository_factory_auto import RepositoryFactory
-from app.db.crud.user_repo import UserRepository
+from app.infra.db.repository_factory_auto import RepositoryFactory
+from app.repo.crud.user_repo import UserRepository
 from app.models import User
 from app.schemas.user_schemas import UserCreate
 from app.core.security.password_utils import get_password_hash, verify_password
 from app.services._base_service import BaseService
 from app.services.user_service import UserService
-from app.utils.jwt_utils import decode_token, revoke_token, create_refresh_token
+from app.utils.jwt_utils import revoke_token, create_refresh_token
 from app.enums.auth_method import AuthMethod
-from app.core.exceptions import UserLockedOutException, UserAlreadyExistsException, AlreadyExistsException, \
+from app.core.exceptions import UserAlreadyExistsException, AlreadyExistsException, \
     UnauthorizedException, NotFoundException, InvalidTokenException, TokenExpiredException, TokenRevokedException
 from app.core.security.providers import AuthProvider, CredentialsProvider
 from app.utils.jwt_utils import (

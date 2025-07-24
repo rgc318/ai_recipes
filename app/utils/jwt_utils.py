@@ -9,7 +9,7 @@ from jwt import ExpiredSignatureError, InvalidTokenError, PyJWTError
 from app.config.settings import settings
 from app.core.exceptions import TokenRevokedException, TokenExpiredException, InvalidTokenException, \
     TokenTypeMismatchException
-from app.utils.redis_client import RedisClient
+from app.infra.redis.redis_client import RedisClient
 
 ALGORITHM = settings.security_settings.jwt_algorithm or "HS256"
 ISSUER = settings.security_settings.jwt_issuer or "ai-recipes"

@@ -16,7 +16,7 @@
 # from app.core.root_logger import get_logger
 # from app.core.settings.directories import AppDirectories
 # from app.core.settings.settings import AppSettings
-# from app.db.db_setup import generate_session
+# from app.repo.db_setup import generate_session
 # from app.lang import local_provider
 # from app.lang.providers import Translator
 # from app.repos._utils import NOT_SET, NotSet

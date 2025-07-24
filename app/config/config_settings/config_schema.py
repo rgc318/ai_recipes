@@ -37,7 +37,7 @@ class DatabaseConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     enable_file: bool = True
-    log_dir: str = "logs"
+    log_dir: str = "../logs"
     rotation: str = "1 week"
     retention: str = "1 month"
 

@@ -4,15 +4,15 @@ from uuid import UUID
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.db.repository_factory_auto import RepositoryFactory
-from app.models.user import Role, Permission
+from app.infra.db.repository_factory_auto import RepositoryFactory
+from app.models.user import Role
 from app.schemas.page_schemas import PageResponse
 from app.schemas.role_schemas import RoleCreate, RoleUpdate, RoleReadWithPermissions
-from app.db.crud.role_repo import RoleRepository
-from app.db.crud.permission_repo import PermissionRepository
+from app.repo.crud.role_repo import RoleRepository
+from app.repo.crud.permission_repo import PermissionRepository
 from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
 from app.services._base_service import BaseService
-from app.config.config_loader import logger
+from app.config.config_settings.config_loader import logger
 
 
 class RoleService(BaseService):

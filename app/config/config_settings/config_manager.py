@@ -4,11 +4,11 @@ from string import Template
 from pathlib import Path
 from functools import lru_cache
 from dotenv import load_dotenv
-from app.config.config_schema import AppConfig
+from app.config.config_settings.config_schema import AppConfig
 from app.core.logger import logger
 
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_ENV = "config"
 
 # 加载 .env 文件（默认）
