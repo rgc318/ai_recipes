@@ -20,7 +20,7 @@ class RoleBase(BaseModel):
     )
     name: str = Field(..., min_length=2, max_length=50, description="角色的显示名称，用于UI展示。例如：'内容编辑'。")
     description: Optional[str] = Field(None, max_length=255, description="角色的详细描述。")
-    created_at: Optional[datetime] = Field()
+
 
 
 class RoleCreate(RoleBase):
@@ -47,6 +47,7 @@ class RoleRead(RoleBase):
     用于从API返回基本角色信息的模型，不含权限详情。
     """
     id: UUID
+    created_at: Optional[datetime] = Field(None)
 
     model_config = {
         "from_attributes": True

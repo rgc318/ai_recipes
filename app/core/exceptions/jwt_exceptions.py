@@ -9,19 +9,19 @@ class UnauthorizedException(BaseBusinessException):
 class TokenExpiredException(UnauthorizedException):
     def __init__(self, message: str = None):
         super().__init__(message or ResponseCodeEnum.TOKEN_EXPIRED.message)
-        self.code = ResponseCodeEnum.TOKEN_EXPIRED.code
+        self.code = 401
 
 class InvalidTokenException(UnauthorizedException):
     def __init__(self, message: str = None):
         super().__init__(message or ResponseCodeEnum.TOKEN_INVALID.message)
-        self.code = ResponseCodeEnum.TOKEN_INVALID.code
+        self.code = 401
 
 class TokenRevokedException(UnauthorizedException):
     def __init__(self, message: str = None):
         super().__init__(message or ResponseCodeEnum.TOKEN_REVOKED.message)
-        self.code = ResponseCodeEnum.TOKEN_REVOKED.code
+        self.code = 401
 
 class TokenTypeMismatchException(UnauthorizedException):
     def __init__(self, message: str = None):
         super().__init__(message or ResponseCodeEnum.TOKEN_TYPE_MISMATCH.message)
-        self.code = ResponseCodeEnum.TOKEN_TYPE_MISMATCH.code
+        self.code = 401
