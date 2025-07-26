@@ -7,8 +7,8 @@ from app.core.security.hasher import get_hasher
 from app.core.security.providers.auth_provider import AuthProvider
 from app.core.exceptions import UserLockedOutException
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.schemas.user_schemas import CredentialsRequest, PrivateUser
-from app.services.user_service import UserService
+from app.schemas.users.user_schemas import CredentialsRequest, PrivateUser
+from app.services.users.user_service import UserService
 from app.enums.auth_method import AuthMethod
 
 logger = get_logger("credentials_provider")

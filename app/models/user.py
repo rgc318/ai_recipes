@@ -1,15 +1,15 @@
 from datetime import datetime
 from typing import Optional, Set, List
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import Column, Integer, DateTime
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import Field, Relationship
 
 from app.enums.auth_method import AuthMethod
 from app.models._model_utils.datetime import utcnow
 from app.models.base.base_model import BaseModel
 from app.models.file_record import FileRecord
-from app.schemas.user_schemas import UserRead
+from app.schemas.users.user_schemas import UserRead
 
 
 class UserRole(BaseModel, table=True):

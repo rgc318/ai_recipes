@@ -5,7 +5,7 @@ from starlette import status
 
 from app.core.security.security import get_current_user
 from app.models.user import User
-from app.schemas.user_context import UserContext
+from app.schemas.users.user_context import UserContext
 
 
 def require_login(current_user: UserContext = Depends(get_current_user)) -> UserContext:

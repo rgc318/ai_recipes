@@ -1,22 +1,22 @@
 from uuid import UUID
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status, Query, Body
+from fastapi import APIRouter, Depends, status, Query
 
 from app.api.dependencies.services import get_role_service
 from app.api.dependencies.permissions import require_superuser
 from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
-from app.core.response_codes import ResponseCodeEnum
-from app.services.role_service import RoleService
-from app.schemas.role_schemas import (
+from app.enums.response_codes import ResponseCodeEnum
+from app.services.users.role_service import RoleService
+from app.schemas.users.role_schemas import (
     RoleCreate,
     RoleUpdate,
     RoleRead,
     RoleReadWithPermissions,
     RolePermissionsUpdate, RoleSelectorRead, RoleFilterParams  # 新增：用于批量更新权限的请求模型
 )
-from app.core.api_response import response_success, StandardResponse, response_error
-from app.schemas.page_schemas import PageResponse
+from app.schemas.common.api_response import response_success, StandardResponse, response_error
+from app.schemas.common.page_schemas import PageResponse
 
 # 同样，使用全局依赖保护所有接口
 router = APIRouter(dependencies=[Depends(require_superuser)])

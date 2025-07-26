@@ -5,15 +5,15 @@ from fastapi import APIRouter, Depends, status, Query
 
 from app.api.dependencies.services import get_permission_service
 from app.api.dependencies.permissions import require_superuser  # 假设的权限依赖
-from app.services.permission_service import PermissionService
-from app.schemas.permission_schemas import (
+from app.services.users.permission_service import PermissionService
+from app.schemas.users.permission_schemas import (
     PermissionCreate,
     PermissionUpdate,
     PermissionRead,
     PermissionSyncResponse, PermissionFilterParams, PermissionSelectorRead  # 新增：用于同步结果的响应模型
 )
-from app.schemas.page_schemas import PageResponse  # 新增：引入分页响应模型
-from app.core.api_response import response_success, StandardResponse
+from app.schemas.common.page_schemas import PageResponse  # 新增：引入分页响应模型
+from app.schemas.common.api_response import response_success, StandardResponse
 
 # 创建一个专门用于权限管理的路由器
 # 使用全局依赖来保护所有接口，这是非常好的实践

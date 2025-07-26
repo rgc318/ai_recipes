@@ -1,5 +1,5 @@
 from app.core.exceptions.base_exception import BaseBusinessException
-from app.core.response_codes import ResponseCodeEnum
+from app.enums.response_codes import ResponseCodeEnum
 
 # === 用户相关异常 ===
 class UserAlreadyExistsException(BaseBusinessException):

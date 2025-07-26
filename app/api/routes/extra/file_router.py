@@ -4,12 +4,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from app.api.dependencies.services import get_file_service # 【修改】建议将依赖注入函数重命名
-from app.core.api_response import StandardResponse, response_success
-from app.schemas.file_schemas import ( # 导入我们为返回值定义的 Pydantic 模型
+from app.schemas.common.api_response import StandardResponse, response_success
+from app.schemas.file.file_schemas import ( # 导入我们为返回值定义的 Pydantic 模型
     UploadResult,
     PresignedUploadURL
 )
-from app.services.file_service import FileService
+from app.services.file.file_service import FileService
 from pydantic import BaseModel, Field
 
 

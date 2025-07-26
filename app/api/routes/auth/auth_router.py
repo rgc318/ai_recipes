@@ -1,22 +1,18 @@
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, status, Header, Cookie
+from fastapi import APIRouter, Depends, status, Cookie
 
-from app.config.settings import settings
-from app.core.security.security import get_current_user, oauth2_scheme
+from app.core.security.security import oauth2_scheme
 from app.enums.auth_method import AuthMethod
-from app.services.auth_service import AuthService
-from app.schemas.user_schemas import UserCreate, CredentialsRequest, UserRead
-from app.schemas.auth_schemas import (
+from app.services.auth.auth_service import AuthService
+from app.schemas.users.user_schemas import UserCreate, CredentialsRequest, UserRead
+from app.schemas.auth.auth_schemas import (
     AuthTokenResponse,
     ChangePasswordRequest,
-    ResetPasswordRequest, AuthTokenBundleResponse, RefreshTokenRequest,
-)
-from app.core.api_response import response_success, response_error, StandardResponse
+    ResetPasswordRequest, )
+from app.schemas.common.api_response import response_success, response_error, StandardResponse
 from app.api.dependencies.services import get_auth_service
-from app.core.response_codes import ResponseCodeEnum
+from app.enums.response_codes import ResponseCodeEnum
 from app.core.logger import logger
 from app.core.exceptions import UserLockedOutException
-from fastapi import Response
 
 from app.utils.cookie_utils import get_refresh_cookie_params
 

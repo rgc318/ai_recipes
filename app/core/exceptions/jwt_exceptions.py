@@ -1,5 +1,5 @@
 from app.core.exceptions import BaseBusinessException
-from app.core.response_codes import ResponseCodeEnum
+from app.enums.response_codes import ResponseCodeEnum
 
 
 class UnauthorizedException(BaseBusinessException):

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from app.core.response_codes import ResponseCodeEnum
+from app.enums.response_codes import ResponseCodeEnum
 
 
 class BaseBusinessException(Exception):

@@ -9,11 +9,10 @@ from app.infra.db.session import create_db_and_tables, get_session
 from contextlib import asynccontextmanager
 from app.core.logger import logger
 from app.core.exceptions import BaseBusinessException, UnauthorizedException
-from app.core.response_codes import ResponseCodeEnum
+from app.enums.response_codes import ResponseCodeEnum
 from app.config.settings import settings
 from app.infra.redis.redis_factory import redis_factory
-from app.services.permission_service import PermissionService
-from app.infra.redis.redis_client import RedisClient
+from app.services.users.permission_service import PermissionService
 
 
 @asynccontextmanager
