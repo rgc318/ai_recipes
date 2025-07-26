@@ -6,9 +6,9 @@ from fastapi.security import OAuth2PasswordBearer
 
 from app.api.dependencies.services import get_user_service
 from app.core.exceptions import InvalidTokenException
-from app.schemas.user_context import UserContext
+from app.schemas.users.user_context import UserContext
 from app.utils.jwt_utils import decode_token, validate_token_type
-from app.services.user_service import UserService
+from app.services.users.user_service import UserService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 

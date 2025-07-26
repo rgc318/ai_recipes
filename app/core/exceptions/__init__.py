@@ -30,6 +30,11 @@ from .jwt_exceptions import (
     TokenExpiredException,
 )
 
+
+from .recipes_exception import (
+    BusinessRuleException,
+
+)
 __all__ = [
     "BaseBusinessException",
     "NotFoundException",
@@ -55,4 +60,8 @@ __all__ = [
     "TokenTypeMismatchException",
     "InvalidTokenException",
     "TokenExpiredException",
+
+    "BusinessRuleException",
 ]
+
+

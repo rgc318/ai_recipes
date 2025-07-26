@@ -3,8 +3,8 @@
 from functools import cached_property
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Any, TypeVar
-from app.repo.crud.user_repo import UserRepository
-from app.repo.crud.recipe_repo import RecipeRepository
+from app.repo.crud.users.user_repo import UserRepository
+from app.repo.crud.recipes.recipe_repo import RecipeRepository
 
 RepoType = TypeVar("RepoType")
 

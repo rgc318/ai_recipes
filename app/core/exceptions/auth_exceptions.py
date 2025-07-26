@@ -1,6 +1,6 @@
 # === 认证/登录相关异常 ===
 from app.core.exceptions.base_exception import BaseBusinessException
-from app.core.response_codes import ResponseCodeEnum
+from app.enums.response_codes import ResponseCodeEnum
 
 
 class LoginFailedException(BaseBusinessException):

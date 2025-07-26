@@ -6,17 +6,17 @@ from app.config.config_settings.config_loader import logger
 from app.api.dependencies.permissions import require_superuser
 from app.core.exceptions import UnauthorizedException, BaseBusinessException
 from app.core.security.security import get_current_user
-from app.schemas.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
+from app.schemas.file.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
     PresignedPolicyRequest
-from app.schemas.user_context import UserContext
-from app.services.file_service import FileService
-from app.services.user_service import UserService
+from app.schemas.users.user_context import UserContext
+from app.services.file.file_service import FileService
+from app.services.users.user_service import UserService
 from app.api.dependencies.services import get_user_service, get_file_service
-from app.schemas.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
+from app.schemas.users.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
     UserFilterParams, UserPasswordUpdate, BatchDeletePayload
-from app.schemas.page_schemas import PageResponse
-from app.core.api_response import response_success, response_error, StandardResponse
-from app.core.response_codes import ResponseCodeEnum
+from app.schemas.common.page_schemas import PageResponse
+from app.schemas.common.api_response import response_success, response_error, StandardResponse
+from app.enums.response_codes import ResponseCodeEnum
 
 router = APIRouter()
 
