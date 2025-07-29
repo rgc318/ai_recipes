@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.user import Role
+from app.models.users.user import Role
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.users.role_schemas import RoleCreate, RoleUpdate, RoleReadWithPermissions
 from app.repo.crud.users.role_repo import RoleRepository

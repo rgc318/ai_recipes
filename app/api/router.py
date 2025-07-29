@@ -1,7 +1,7 @@
 from fastapi import APIRouter
-from app.api.routes.extra import file_router
-from app.api.routes.recipes import recipes_router, tag_router, ingredient_router
-from app.api.routes.management import user_router, role_router, permission_router, file_management_router, unit_router
+from app.api.routes.extra import file_router, file_management_router
+from app.api.routes.recipes import recipes_router, tag_router, ingredient_router, unit_router
+from app.api.routes.management import user_router, role_router, permission_router
 from app.api.routes.auth import auth_router
 
 api_router = APIRouter()

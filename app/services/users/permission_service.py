@@ -6,7 +6,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.config.permission_config.permissions_enum import PERMISSIONS_CONFIG
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.user import Permission
+from app.models.users.user import Permission
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.users.permission_schemas import PermissionCreate, PermissionUpdate, PermissionRead
 from app.repo.crud.users.permission_repo import PermissionRepository

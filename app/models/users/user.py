@@ -8,7 +8,7 @@ from sqlmodel import Field, Relationship
 from app.enums.auth_method import AuthMethod
 from app.models._model_utils.datetime import utcnow
 from app.models.base.base_model import BaseModel
-from app.models.file_record import FileRecord
+from app.models.files.file_record import FileRecord
 from app.schemas.users.user_schemas import UserRead
 
 

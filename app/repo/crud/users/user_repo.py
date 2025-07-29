@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import EmailStr
 from sqlalchemy.orm import selectinload
 
-from app.models.user import User, Role, UserRole
+from app.models.users.user import User, Role, UserRole
 from app.schemas.users.user_schemas import UserCreate, UserUpdate
 from app.schemas.common.page_schemas import PageResponse
 from app.repo.crud.common.base_repo import BaseRepository

@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 
 from app.core.exceptions import NotFoundException, AlreadyExistsException, BusinessRuleException
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.recipe import Tag, RecipeTagLink  # 导入 RecipeTagLink 用于检查
+from app.models.recipes.recipe import Tag, RecipeTagLink  # 导入 RecipeTagLink 用于检查
 from app.schemas.recipes.tag_schemas import TagCreate, TagUpdate, TagRead
 from app.repo.crud.recipes.tag_repo import TagRepository
 from app.repo.crud.common.base_repo import PageResponse

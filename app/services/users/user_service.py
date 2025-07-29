@@ -10,7 +10,7 @@ from app.core.exceptions import UserNotFoundException, NotFoundException, Alread
     ConcurrencyConflictException, UnauthorizedException
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.user import User
+from app.models.users.user import User
 from app.schemas.file.file_record_schemas import FileRecordCreate
 from app.schemas.file.file_schemas import AvatarLinkDTO
 from app.schemas.users.user_context import UserContext

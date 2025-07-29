@@ -1,13 +1,12 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
-from datetime import datetime
 
 from sqlmodel import Field, Relationship
 
 from app.models.base.base_model import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.user import User
+    from app.models.users.user import User
 
 
 class FileRecord(BaseModel, table=True):

@@ -6,26 +6,26 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status, Query
 
-from app.api.dependencies.permissions import require_superuser, require_authenticated_user
+from app.api.dependencies.permissions import require_superuser, require_verified_user
 from app.api.dependencies.services import get_unit_service
 from app.core.exceptions import BaseBusinessException
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
 from app.schemas.common.page_schemas import PageResponse
-from app.schemas.unit_schemas import (
+from app.schemas.recipes.unit_schemas import (
     UnitRead,
     UnitCreate,
     UnitUpdate,
     UnitFilterParams,
 )
-from app.services.units.unit_service import UnitService
+from app.services.recipes.unit_service import UnitService
 
-router = APIRouter(prefix="/units", tags=["Units"])
+router = APIRouter()
 
 @router.get(
     "/all",
     response_model=StandardResponse[List[UnitRead]],
     summary="获取所有单位列表",
-    dependencies=[Depends(require_authenticated_user)],
+    dependencies=[Depends(require_verified_user)],
 )
 async def get_all_units(service: UnitService = Depends(get_unit_service)):
     """

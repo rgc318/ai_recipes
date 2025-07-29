@@ -1,19 +1,24 @@
 # app/services/recipe_service.py
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union, Optional
 from uuid import UUID
 
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.exceptions import NotFoundException, ConcurrencyConflictException
+from app.core.exceptions.base_exception import PermissionDeniedException
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.recipe import Recipe
+from app.models.recipes.recipe import Recipe
+from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeRead  # 导入 RecipeRead
 from app.repo.crud.recipes.recipe_repo import RecipeRepository
 from app.repo.crud.recipes.tag_repo import TagRepository  # 假设已存在
 from app.repo.crud.recipes.ingredient_repo import IngredientRepository  # 假设已存在
 from app.repo.crud.common.base_repo import PageResponse
+from app.schemas.users.user_context import UserContext
 from app.services._base_service import BaseService
+# 【核心】导入我们最终版的、模块化的 RecipePolicy 单例
+from app.core.permissions.recipes.recipes_permission import recipe_policy
 
 
 class RecipeService(BaseService):
@@ -24,119 +29,150 @@ class RecipeService(BaseService):
         self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)
         self.tag_repo: TagRepository = factory.get_repo_by_type(TagRepository)
         self.ingredient_repo: IngredientRepository = factory.get_repo_by_type(IngredientRepository)
+        self.file_repo: FileRecordRepository = factory.get_repo_by_type(FileRecordRepository)
 
-    async def get_recipe_details(self, recipe_id: UUID) -> Recipe:
+    async def _process_tags(self, tag_inputs: List[Union[UUID, str]]) -> List[UUID]:
         """
-        获取单个菜谱的完整信息。如果未找到，则抛出业务异常。
+        【新增】一个内部辅助方法，用于处理混合类型的标签输入。
+        它会将字符串标签转换为已存在的或新创建的标签ID。
         """
+        if not tag_inputs:
+            return []
+
+        final_tag_ids = set()
+        existing_ids_to_validate = []
+
+        for item in tag_inputs:
+            if isinstance(item, UUID):
+                # 先收集所有传入的UUID，稍后一次性验证
+                existing_ids_to_validate.append(item)
+            elif isinstance(item, str) and item.strip():
+                # 对于字符串，调用 repo 的 find_or_create 方法
+                # 这个方法是原子性的，能保证标签的唯一性
+                tag_orm = await self.tag_repo.find_or_create(item.strip())
+                final_tag_ids.add(tag_orm.id)
+
+        # 一次性验证所有传入的UUID是否存在
+        if existing_ids_to_validate:
+            if not await self.tag_repo.are_ids_valid(existing_ids_to_validate):
+                raise NotFoundException("一个或多个指定的标签ID不存在")
+            final_tag_ids.update(existing_ids_to_validate)
+
+        return list(final_tag_ids)
+
+    async def _handle_recipe_relations(
+            self, recipe_orm: Recipe, recipe_in: Union[RecipeCreate, RecipeUpdate]
+    ):
+        """统一处理所有菜谱关联关系的内部方法。"""
+        # 1. 处理标签
+        if recipe_in.tags is not None:
+            final_tag_ids = await self._process_tags(recipe_in.tags)
+            await self.recipe_repo.set_recipe_tags(recipe_orm.id, final_tag_ids)
+
+        # 2. 处理配料
+        if recipe_in.ingredients is not None:
+            ingredient_ids = [ing.ingredient_id for ing in recipe_in.ingredients]
+            # 【优化】只有当列表不为空时才进行数据库校验
+            if ingredient_ids and not await self.ingredient_repo.are_ids_valid(ingredient_ids):
+                raise NotFoundException("一个或多个指定的食材不存在")
+            await self.recipe_repo.set_recipe_ingredients(recipe_orm.id, recipe_in.ingredients)
+
+        # 3. 处理结构化步骤
+        if recipe_in.steps is not None:
+            all_image_ids = [img_id for step in recipe_in.steps if step.image_ids for img_id in step.image_ids]
+            # 【优化】只有当列表不为空时才进行数据库校验
+            if all_image_ids and not await self.file_repo.are_ids_valid(list(set(all_image_ids))):
+                raise NotFoundException("步骤中引用了一个或多个不存在的图片ID")
+            await self.recipe_repo.set_recipe_steps(recipe_orm.id, recipe_in.steps)
+
+        # 4. 处理封面图片
+        # 使用 hasattr 检查是因为 RecipeUpdate 中它是可选的
+        if hasattr(recipe_in, 'cover_image_id'):
+            cover_id = recipe_in.cover_image_id
+            # 【优化】同时处理设置新封面和移除封面(传入None)的场景
+            if cover_id and not await self.file_repo.are_ids_valid([cover_id]):
+                raise NotFoundException("指定的封面图片ID不存在")
+            await self.recipe_repo.update_cover_image(recipe_orm, cover_id)
+
+        # 5. 处理画廊图片
+        if recipe_in.gallery_image_ids is not None:
+            # 【优化】只有当列表不为空时才进行数据库校验
+            if recipe_in.gallery_image_ids and not await self.file_repo.are_ids_valid(recipe_in.gallery_image_ids):
+                raise NotFoundException("画廊中引用了一个或多个不存在的图片ID")
+            await self.recipe_repo.set_recipe_gallery(recipe_orm.id, recipe_in.gallery_image_ids)
+
+    async def get_recipe_details(self, recipe_id: UUID, current_user: Optional[UserContext] = None) -> Recipe:
         recipe = await self.recipe_repo.get_by_id_with_details(recipe_id)
         if not recipe:
             raise NotFoundException("菜谱不存在")
+        if current_user:
+            recipe_policy.can_view(current_user, recipe, "菜谱")
         return recipe
 
     async def page_list_recipes(
-            self, page: int, per_page: int, sort_by: List[str], filters: Dict[str, Any]
+            self, page: int, per_page: int, sort_by: List[str], filters: Dict[str, Any], current_user: Optional[UserContext] = None
     ) -> PageResponse[RecipeRead]:
-        """
-        获取菜谱分页列表。
-        此方法现在只是一个简单的代理，将参数直接传递给 Repository。
-        """
-        # 直接调用 Repository 中已经封装好的、强大的分页方法
+        if current_user:
+            recipe_policy.can_list(current_user)
         paged_recipes_orm = await self.recipe_repo.get_paged_recipes(
             page=page, per_page=per_page, sort_by=sort_by, filters=filters or {}
         )
-
-        # 将 ORM 对象列表转换为 Pydantic DTO 列表
         paged_recipes_orm.items = [RecipeRead.model_validate(item) for item in paged_recipes_orm.items]
-
         return paged_recipes_orm
 
-    async def create_recipe(self, recipe_in: RecipeCreate, user_context_id: UUID) -> Recipe:
-        """
-        【事务性】创建一个完整的菜谱，包含基本信息、标签和配料。
-        """
-        # 1. 从输入数据中分离出关联ID
-        recipe_data = recipe_in.model_dump(exclude={"tag_ids", "ingredients"})
-        tag_ids = recipe_in.tag_ids or []
-        ingredients_data = recipe_in.ingredients or []
-
-        # 2. 【业务校验】在事务开始前，校验所有关联ID的有效性
-        if tag_ids:
-            if not await self.tag_repo.are_ids_valid(tag_ids):
-                raise NotFoundException("一个或多个指定的标签不存在")
-        if ingredients_data:
-            ingredient_ids = [ing.ingredient_id for ing in ingredients_data]
-            if not await self.ingredient_repo.are_ids_valid(ingredient_ids):
-                raise NotFoundException("一个或多个指定的食材不存在")
+    async def create_recipe(self, recipe_in: RecipeCreate, user_context: UserContext) -> Recipe:
+        """【V3】创建一个结构化的、支持富媒体的完整菜谱。"""
+        recipe_policy.can_create(user_context)
+        # 提取用于创建 Recipe 主表的数据
+        recipe_data = recipe_in.model_dump(
+            exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids"}
+        )
 
         try:
-            # 3. 【核心操作】开始构建菜谱
-            # a. 创建菜谱主对象
-            recipe_data['created_by'] = user_context_id
-            recipe_data['updated_by'] = user_context_id
+            # 1. 创建菜谱主对象
             recipe_orm = await self.recipe_repo.create(recipe_data)
-            await self.recipe_repo.flush()  # 立即刷入数据库以获取 recipe_orm.id
+            await self.recipe_repo.flush()
 
-            # b. 设置标签和配料关联
-            if tag_ids:
-                await self.recipe_repo.set_recipe_tags(recipe_orm.id, tag_ids)
-            if ingredients_data:
-                await self.recipe_repo.set_recipe_ingredients(recipe_orm.id, ingredients_data)
+            # 2. 【核心修改】调用统一的关联处理方法
+            await self._handle_recipe_relations(recipe_orm, recipe_in)
 
-            # 4. 【提交事务】所有操作成功，提交整个事务
+            # 3. 提交整个事务
             await self.recipe_repo.commit()
-
-            # 5. 刷新对象以加载完整的关联数据
             await self.recipe_repo.refresh(recipe_orm)
-            return recipe_orm
-
+            # 刷新后返回完整的菜谱对象
+            return await self.get_recipe_details(recipe_orm.id)
         except Exception as e:
             self.logger.error(f"创建菜谱失败: {e}")
-            # 发生任何错误，回滚事务
             await self.recipe_repo.rollback()
             raise e
 
-    async def update_recipe(self, recipe_id: UUID, recipe_in: RecipeUpdate, user_context_id: UUID) -> Recipe:
-        """
-        【事务性与并发安全】更新一个菜谱。
-        """
-        # 1. 获取要更新的菜谱，同时处理“未找到”的情况
+    async def update_recipe(self, recipe_id: UUID, recipe_in: RecipeUpdate, user_context: UserContext) -> Recipe:
+        """【V3】更新一个结构化的、支持富媒体的完整菜谱。"""
         recipe_orm = await self.get_recipe_details(recipe_id)
+        if not recipe_orm:
+            raise NotFoundException("菜谱不存在")
+        recipe_policy.can_update(user_context, recipe_orm)
+        # 提取用于更新 Recipe 主表的常规字段
+        update_data = recipe_in.model_dump(
+            exclude_unset=True,
+            exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids"}
+        )
 
-        # 2. 分离更新数据
-        update_data = recipe_in.model_dump(exclude_unset=True)
-        tag_ids = update_data.pop("tag_ids", None)
-        ingredients_data = update_data.pop("ingredients", None)
-
-        # 注入更新人信息
-        update_data['updated_by'] = user_context_id
 
         try:
-            # 3. 【业务校验与执行】
-            # a. 更新标签 (如果提供了)
-            if tag_ids is not None:
-                if not await self.tag_repo.are_ids_valid(tag_ids):
-                    raise NotFoundException("一个或多个指定的标签不存在")
-                await self.recipe_repo.set_recipe_tags(recipe_id, tag_ids)
-
-            # b. 更新配料 (如果提供了)
-            if ingredients_data is not None:
-                ingredient_ids = [ing.ingredient_id for ing in ingredients_data]
-                if not await self.ingredient_repo.are_ids_valid(ingredient_ids):
-                    raise NotFoundException("一个或多个指定的食材不存在")
-                await self.recipe_repo.set_recipe_ingredients(recipe_id, ingredients_data)
-
-            # c. 更新菜谱主表字段
+            # 1. 更新常规字段
             if update_data:
                 await self.recipe_repo.update(recipe_orm, update_data)
 
-            # 4. 【提交事务】
+            # 2. 【核心修改】调用统一的关联处理方法
+            #    注意：recipe_in 包含了所有可能更新的关联字段
+            await self._handle_recipe_relations(recipe_orm, recipe_in)
+
+            # 3. 提交整个事务
             await self.recipe_repo.commit()
             await self.recipe_repo.refresh(recipe_orm)
-            return recipe_orm
-
+            return await self.get_recipe_details(recipe_id)
         except StaleDataError:
-            # 捕获乐观锁冲突
             await self.recipe_repo.rollback()
             raise ConcurrencyConflictException("操作失败，菜谱数据已被他人修改，请刷新后重试")
         except Exception as e:
@@ -144,23 +180,41 @@ class RecipeService(BaseService):
             await self.recipe_repo.rollback()
             raise e
 
-    async def delete_recipe(self, recipe_id: UUID, user_context_id: UUID) -> None:
-        """
-        【事务性】软删除一个菜谱。
-        """
-        # 获取菜谱，确保它存在，同时也方便后续操作
-        recipe_to_delete = await self.get_recipe_details(recipe_id)
+    async def delete_recipe(self, recipe_id: UUID, user_context: UserContext) -> None:
+        recipe_to_delete = await self.recipe_repo.get_by_id(recipe_id)
+        if not recipe_to_delete:
+            raise NotFoundException("菜谱不存在")
 
-        # 在软删除前，也可以选择清理关联（可选，取决于业务需求）
-        # await self.recipe_repo.set_recipe_tags(recipe_id, [])
-        # await self.recipe_repo.set_recipe_ingredients(recipe_id, [])
-
+        recipe_policy.can_delete(user_context, recipe_to_delete)
         try:
-            # 为软删除操作注入删除人信息
-            self.recipe_repo.context['user_id'] = user_context_id
+            self.recipe_repo.context['user_id'] = user_context.id
             await self.recipe_repo.soft_delete(recipe_to_delete)
             await self.recipe_repo.commit()
         except Exception as e:
             self.logger.error(f"删除菜谱 {recipe_id} 失败: {e}")
+            await self.recipe_repo.rollback()
+            raise e
+
+    # =================================================================
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心新增功能 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # =================================================================
+    async def batch_delete_recipes(self, recipe_ids: List[UUID], current_user: UserContext) -> int:
+        if not recipe_ids:
+            return 0
+
+        recipes_to_delete = await self.recipe_repo.get_by_ids(recipe_ids)
+        if len(recipes_to_delete) != len(set(recipe_ids)):
+            raise NotFoundException("一个或多个指定的菜谱不存在")
+
+        # 【权限检查】在循环中复用权限检查
+        for recipe in recipes_to_delete:
+            recipe_policy.can_delete(current_user, recipe)
+
+        try:
+            deleted_count = await self.recipe_repo.soft_delete_by_ids(recipe_ids)
+            await self.recipe_repo.commit()
+            return deleted_count
+        except Exception as e:
+            self.logger.error(f"批量删除菜谱失败: {e}")
             await self.recipe_repo.rollback()
             raise e

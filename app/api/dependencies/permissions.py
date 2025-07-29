@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException
 from starlette import status
 
 from app.core.security.security import get_current_user
-from app.models.user import User
+from app.models.users.user import User
 from app.schemas.users.user_context import UserContext
 
 

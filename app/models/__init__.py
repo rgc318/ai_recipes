@@ -1,7 +1,7 @@
 # app/models/__init__.py
 
 # === 用户模块 ===
-from app.models.user import (
+from app.models.users.user import (
     User,
     UserAuth,
     UserSavedRecipe,
@@ -15,7 +15,7 @@ from app.models.user import (
 )
 
 # === 菜谱模块 ===
-from app.models.recipe import (
+from app.models.recipes.recipe import (
     Recipe,
     RecipeIngredient,
     Ingredient,

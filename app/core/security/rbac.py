@@ -1,7 +1,7 @@
 # app/core/security/rbac.py
 
 from fastapi import Depends, HTTPException
-from app.models.user import User
+from app.models.users.user import User
 from app.core.security.security import get_current_user
 
 def require_permission(permission: str):
