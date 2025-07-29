@@ -7,10 +7,10 @@ from sqlalchemy import select, func
 
 from app.core.exceptions import NotFoundException, AlreadyExistsException, BusinessRuleException
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.recipe import Unit, RecipeIngredient
-from app.schemas.unit_schemas import UnitCreate, UnitUpdate, UnitRead
-from app.repo.crud.unit_repo import UnitRepository
-from app.repo.crud.base_repo import PageResponse
+from app.models.recipes.recipe import Unit, RecipeIngredient
+from app.schemas.common.page_schemas import PageResponse
+from app.schemas.recipes.unit_schemas import UnitCreate, UnitUpdate, UnitRead
+from app.repo.crud.recipes.unit_repo import UnitRepository
 from app.services._base_service import BaseService
 
 

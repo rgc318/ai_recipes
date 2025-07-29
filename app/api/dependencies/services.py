@@ -3,10 +3,12 @@ from fastapi import Depends
 
 
 from app.infra.storage.storage_factory import storage_factory
+
 from app.services.file.file_record_service import FileRecordService
 from app.services.file.file_service import FileService
 from app.services.recipes.ingredient_service import IngredientService
 from app.services.recipes.tag_service import TagService
+from app.services.recipes.unit_service import UnitService
 from app.services.users.permission_service import PermissionService
 from app.services.users.role_service import RoleService
 from app.services.users.user_service import UserService
@@ -60,3 +62,9 @@ def get_ingredient_service(
 ) -> IngredientService:
     """Dependency provider for IngredientService."""
     return IngredientService(repo_factory)
+
+def get_unit_service(
+    repo_factory: RepositoryFactory = Depends(get_repository_factory),
+) -> UnitService:
+    """Dependency provider for IngredientService."""
+    return UnitService(repo_factory)

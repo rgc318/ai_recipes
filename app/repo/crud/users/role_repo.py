@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.repo.crud.common.base_repo import BaseRepository
-from app.models.user import Role, Permission
+from app.models.users.user import Role, Permission
 from app.schemas.users.role_schemas import RoleCreate, RoleUpdate
 
 class RoleRepository(BaseRepository[Role, RoleCreate, RoleUpdate]):

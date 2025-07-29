@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
-from app.models.recipe import Ingredient
+from app.models.recipes.recipe import Ingredient
 from app.schemas.recipes.ingredient_schemas import IngredientCreate, IngredientUpdate
 
 

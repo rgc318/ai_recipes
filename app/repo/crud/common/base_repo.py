@@ -71,6 +71,15 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         创建一个新的对象实例，并将其添加到会话中。
         """
         create_data = obj_in if isinstance(obj_in, dict) else obj_in.model_dump(exclude_unset=True)
+
+        # 【新增】自动注入 created_by 和 updated_by
+        user_id = self.context.get("user_id")
+        if user_id:
+            if hasattr(self.model, "created_by"):
+                create_data["created_by"] = user_id
+            if hasattr(self.model, "updated_by"):
+                create_data["updated_by"] = user_id
+
         db_obj = self.model(**create_data)
         self.db.add(db_obj)
         await self.db.flush()
@@ -103,6 +112,10 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         # 自动更新 updated_at 字段 (如果存在)
         if hasattr(db_obj, "updated_at"):
             setattr(db_obj, "updated_at", datetime.now(timezone.utc))
+
+        user_id = self.context.get("user_id")
+        if user_id and hasattr(db_obj, "updated_by"):
+            setattr(db_obj, "updated_by", user_id)
 
         self.db.add(db_obj)
         await self.db.flush()

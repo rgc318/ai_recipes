@@ -1,13 +1,11 @@
 # app/repo/crud/unit_repo.py
 
 from typing import List, Optional, Dict, Any
-from uuid import UUID
 
-from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
-from app.models.recipe import Unit
+from app.models.recipes.recipe import Unit
 from app.schemas.recipes.unit_schemas import UnitCreate, UnitUpdate
 
 

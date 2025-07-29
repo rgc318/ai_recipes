@@ -1,8 +1,11 @@
-from typing import Optional
+from typing import Optional, List
+from uuid import UUID
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repo.crud.common.base_repo import BaseRepository
-from app.models.file_record import FileRecord
+from app.models.files.file_record import FileRecord
 from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate
 
 
@@ -21,6 +24,33 @@ class FileRecordRepository(BaseRepository[FileRecord, FileRecordCreate, FileReco
         """
         super().__init__(db, FileRecord, context)
 
+        # =================================================================
+        # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心新增功能 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        # =================================================================
+
+    async def are_ids_valid(self, ids: List[UUID]) -> bool:
+        """
+        高效地检查一组文件ID是否都存在于 file_record 表中。
+        这个方法对于需要关联文件的 Service (如 RecipeService) 至关重要。
+
+        Args:
+            ids (List[UUID]): 需要验证的文件记录ID列表。
+
+        Returns:
+            bool: 如果所有ID都有效，则返回 True，否则返回 False。
+        """
+        if not ids:
+            return True  # 空列表或None被视为有效
+
+        unique_ids = set(ids)
+        stmt = select(func.count(self.model.id)).where(self.model.id.in_(unique_ids))
+
+        result = await self.db.execute(stmt)
+        existing_count = result.scalar_one()
+
+        return existing_count == len(unique_ids)
+
+    # =================================================================
     async def get_by_object_name(self, object_name: str) -> Optional[FileRecord]:
         """
         根据文件在对象存储中的唯一路径 (object_name) 获取文件记录。

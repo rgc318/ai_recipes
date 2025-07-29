@@ -8,15 +8,15 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
-from app.models.recipe import (
+from app.models.recipes.recipe import (
     Recipe,
     RecipeIngredient,
     Ingredient,  # 导入 Ingredient 用于 JOIN
     # 导入 Tag 用于 JOIN
     RecipeTagLink,
-    Unit,
+    Unit, RecipeStep, RecipeStepImageLink, RecipeGalleryLink,
 )
-from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeIngredientInput
+from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeIngredientInput, RecipeStepInput
 
 
 class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
@@ -31,17 +31,16 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
     # ==========================
 
     async def get_by_id_with_details(self, recipe_id: UUID) -> Optional[Recipe]:
-        """
-        根据ID获取单个菜谱，并预加载所有关联的详细信息。
-        这是获取菜谱详情页数据的推荐方法。
-        """
         stmt = (
-            self._base_stmt()  # 使用父类的基础语句，自动处理软删除
+            self._base_stmt()
             .where(self.model.id == recipe_id)
             .options(
+                selectinload(Recipe.cover_image), # 预加载封面图
+                selectinload(Recipe.gallery_images), # 预加载画廊
                 selectinload(Recipe.tags),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),
+                selectinload(Recipe.steps).selectinload(RecipeStep.images), # 预加载步骤及其图片
             )
         )
         result = await self.db.execute(stmt)
@@ -81,7 +80,9 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
 
         # 3. 定义需要“预加载”的关联数据
         eager_loading_options = [
+            selectinload(Recipe.cover_image),  # 【更新】
             selectinload(Recipe.tags),
+            selectinload(Recipe.steps),  # 预加载步骤，但不加载步骤的图片(列表页通常不需要)
             selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
             selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),
         ]
@@ -99,7 +100,59 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
     # ==========================
     # 关联关系更新方法 (由 Service 层在事务中调用)
     # ==========================
+    async def set_recipe_steps(self, recipe_id: UUID, steps_data: List[RecipeStepInput]) -> None:
+        """【优化版】重新设置一个菜谱的所有步骤，采用批量操作以提升性能。"""
+        await self.db.execute(delete(RecipeStep).where(RecipeStep.recipe_id == recipe_id))
+        await self.db.flush()
 
+        if not steps_data:
+            return
+
+        # --- 第一轮：批量创建所有 Step 对象 ---
+        new_steps_map = {}  # 用一个字典来保存新创建的 step 和它对应的输入数据
+        for i, step_in in enumerate(steps_data):
+            step = RecipeStep(
+                recipe_id=recipe_id,
+                step_number=i + 1,
+                instruction=step_in.instruction
+            )
+            self.db.add(step)
+            new_steps_map[step] = step_in  # 建立 ORM 对象和输入 DTO 的映射
+
+        # --- 一次性 Flush ---
+        # 这一步会执行所有 INSERT 语句，并为所有 new_steps 对象填充数据库生成的 ID
+        await self.db.flush()
+
+        # --- 第二轮：批量创建所有图片关联 ---
+        image_links_to_add = []
+        for step_orm, step_in_data in new_steps_map.items():
+            if step_in_data.image_ids:
+                for img_id in set(step_in_data.image_ids):
+                    image_links_to_add.append(
+                        RecipeStepImageLink(step_id=step_orm.id, file_id=img_id)
+                    )
+
+        if image_links_to_add:
+            self.db.add_all(image_links_to_add)
+
+        await self.db.flush()
+
+    async def set_recipe_gallery(self, recipe_id: UUID, image_ids: List[UUID]) -> None:
+        """【新增】重新设置菜谱的图片画廊。"""
+        await self.db.execute(delete(RecipeGalleryLink).where(RecipeGalleryLink.recipe_id == recipe_id))
+        if image_ids:
+            links = [
+                RecipeGalleryLink(recipe_id=recipe_id, file_id=img_id, display_order=i)
+                for i, img_id in enumerate(image_ids)
+            ]
+            self.db.add_all(links)
+        await self.db.flush()
+
+    async def update_cover_image(self, recipe: Recipe, cover_image_id: Optional[UUID]) -> None:
+        """【新增】更新菜谱的封面图片。"""
+        recipe.cover_image_id = cover_image_id
+        self.db.add(recipe)
+        await self.db.flush()
     async def set_recipe_tags(self, recipe_id: UUID, tag_ids: List[UUID]) -> None:
         """
         【原子化操作】重新设置一个菜谱的所有标签。

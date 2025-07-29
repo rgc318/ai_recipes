@@ -6,7 +6,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repo.crud.common.base_repo import BaseRepository
-from app.models.user import Permission
+from app.models.users.user import Permission
 from app.schemas.users.permission_schemas import PermissionCreate, PermissionUpdate
 
 logger = logging.getLogger(__name__)

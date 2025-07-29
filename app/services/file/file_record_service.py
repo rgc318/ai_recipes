@@ -3,7 +3,7 @@ from uuid import UUID
 
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.repo.crud.file.file_record_repo import FileRecordRepository
-from app.models.file_record import FileRecord
+from app.models.files.file_record import FileRecord
 from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate, FileRecordRead
 from app.schemas.common.page_schemas import PageResponse
 from app.services.file.file_service import FileService  # 需要 FileService 来生成 URL
