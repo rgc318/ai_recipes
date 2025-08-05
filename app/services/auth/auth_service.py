@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.repo.crud.users.user_repo import UserRepository
-from app.models import User
+from app.models.users.user import User
 from app.schemas.users.user_schemas import UserCreate
 from app.core.security.password_utils import get_password_hash, verify_password
 from app.services._base_service import BaseService

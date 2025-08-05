@@ -110,8 +110,8 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             setattr(db_obj, field, value)
 
         # 自动更新 updated_at 字段 (如果存在)
-        if hasattr(db_obj, "updated_at"):
-            setattr(db_obj, "updated_at", datetime.now(timezone.utc))
+        # if hasattr(db_obj, "updated_at"):
+        #     setattr(db_obj, "updated_at", datetime.now(timezone.utc))
 
         user_id = self.context.get("user_id")
         if user_id and hasattr(db_obj, "updated_by"):

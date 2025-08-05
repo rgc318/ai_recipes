@@ -18,4 +18,5 @@ dependencies = [
     "python-jose",
     "prometheus_client",
     "aioredis",
+    "slugify>=0.0.1",
 ]
