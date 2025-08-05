@@ -5,6 +5,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from app.models._model_utils.guid import GUID
 from app.models.base.base_model import BaseModel, AutoTableNameMixin
 from app.models.files.file_record import FileRecord
+from app.models.common.category_model import Category, RecipeCategoryLink
 
 
 class RecipeGalleryLink(BaseModel, table=True):
@@ -80,6 +81,9 @@ class RecipeIngredient(AutoTableNameMixin, SQLModel,  table=True):
 class Recipe(BaseModel, table=True):
     title: str
     description: Optional[str] = None
+    prep_time: Optional[str] = Field(None, description="准备时间, e.g., '15分钟'")
+    cook_time: Optional[str] = Field(None, description="烹饪时间, e.g., '30分钟'")
+    servings: Optional[str] = Field(None, description="份量, e.g., '2-3人份'")
 
     cover_image_id: Optional[uuid.UUID] = Field(default=None, foreign_key="file_record.id")
     cover_image: Optional["FileRecord"] = Relationship(
@@ -101,7 +105,7 @@ class Recipe(BaseModel, table=True):
 
     ingredients: List["RecipeIngredient"] = Relationship(back_populates="recipe")
     tags: List["Tag"] = Relationship(back_populates="recipes", link_model=RecipeTagLink)
-
+    categories: List["Category"] = Relationship(back_populates="recipes", link_model=RecipeCategoryLink)
 
 # 设置反向关系
 RecipeIngredient.recipe = Relationship(back_populates="ingredients")

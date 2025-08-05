@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.schemas.file.file_record_schemas import FileRecordRead
+from app.schemas.common.category_schemas import CategoryRead
 
 
 # --- 其他 Schema 保持不变 ---
@@ -83,6 +84,9 @@ class RecipeIngredientRead(BaseModel):
 class RecipeBase(BaseModel):
     title: str
     description: Optional[str] = None
+    prep_time: Optional[str] = None
+    cook_time: Optional[str] = None
+    servings: Optional[str] = None
 
 
 # =================================================================
@@ -98,6 +102,7 @@ class RecipeCreate(RecipeBase):
     cover_image_id: Optional[UUID] = Field(None, description="封面图片的FileRecord ID")
     gallery_image_ids: Optional[List[UUID]] = Field(None, description="画廊图片的FileRecord ID列表")
     steps: Optional[List[RecipeStepInput]] = Field(None, description="结构化的烹饪步骤列表")
+    category_ids: Optional[List[UUID]] = Field(None, description="关联的分类ID列表")
 
 
 class RecipeUpdate(BaseModel):
@@ -111,6 +116,7 @@ class RecipeUpdate(BaseModel):
     cover_image_id: Optional[UUID] = None
     gallery_image_ids: Optional[List[UUID]] = None
     steps: Optional[List[RecipeStepInput]] = None
+    category_ids: Optional[List[UUID]] = None
 
 
 # =================================================================
@@ -127,6 +133,7 @@ class RecipeRead(RecipeBase):
     cover_image: Optional[FileRecordRead] = None
     gallery_images: List[FileRecordRead] = []
     steps: List[RecipeStepRead] = []
+    categories: List["CategoryRead"] = []
 
     model_config = {"from_attributes": True}
 
