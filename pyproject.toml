@@ -19,4 +19,5 @@ dependencies = [
     "prometheus_client",
     "aioredis",
     "slugify>=0.0.1",
+    "alembic>=1.16.4",
 ]

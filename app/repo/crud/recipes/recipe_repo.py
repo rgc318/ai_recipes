@@ -82,6 +82,8 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         eager_loading_options = [
             selectinload(Recipe.cover_image),  # 【更新】
             selectinload(Recipe.tags),
+            selectinload(Recipe.gallery_images),  # <-- 添加这一行
+            selectinload(Recipe.categories),     # <-- 如果您有 categories 也要加上
             selectinload(Recipe.steps),  # 预加载步骤，但不加载步骤的图片(列表页通常不需要)
             selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
             selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),
