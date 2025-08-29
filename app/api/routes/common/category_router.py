@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query
 
 from app.api.dependencies.permissions import require_superuser, require_authenticated_user
-from app.api.dependencies.services import get_category_service # 假设已在 services.py 中创建
+from app.api.dependencies.service_getters.categories_service_getter import get_category_service # 假设已在 common_service_getter.py 中创建
 from app.core.exceptions import BaseBusinessException
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
 from app.schemas.common.page_schemas import PageResponse
@@ -19,13 +19,8 @@ from app.schemas.common.category_schemas import (
     CategoryReadWithChildren,
 )
 from app.services.common.category_service import CategoryService
-from app.schemas.users.user_context import UserContext
-from app.core.security.security import get_current_user
 
-router = APIRouter(
-    prefix="/categories",
-    tags=["Categories"]
-)
+router = APIRouter()
 
 @router.get(
     "/tree",
@@ -59,18 +54,15 @@ async def list_categories_paginated(
     per_page: int = Query(10, ge=1, le=100),
     sort: Optional[str] = Query("name"),
     filter_params: CategoryFilterParams = Depends(),
-    current_user: UserContext = Depends(get_current_user),
 ):
     """
     供后台管理使用的分页、筛选、排序接口。
     """
     sort_by = sort.split(',') if sort else ["name"]
     filters = filter_params.model_dump(exclude_unset=True)
-    if "name" in filters:
-        filters["name__ilike"] = filters.pop("name")
 
     page_data = await service.page_list_categories(
-        page=page, per_page=per_page, sort_by=sort_by, filters=filters, current_user=current_user
+        page=page, per_page=per_page, sort_by=sort_by, filters=filters
     )
     return response_success(data=page_data)
 
@@ -85,11 +77,10 @@ async def list_categories_paginated(
 async def create_category(
     category_in: CategoryCreate,
     service: CategoryService = Depends(get_category_service),
-    current_user: UserContext = Depends(get_current_user),
 ):
     try:
         # 传递 current_user 以便 Service 层进行权限检查和审计记录
-        new_category = await service.create_category(category_in, current_user)
+        new_category = await service.create_category(category_in)
         return response_success(data=CategoryRead.model_validate(new_category), message="分类创建成功")
     except BaseBusinessException as e:
         return response_error(message=e.message)
@@ -104,10 +95,9 @@ async def create_category(
 async def get_category_details(
     category_id: UUID,
     service: CategoryService = Depends(get_category_service),
-    current_user: UserContext = Depends(get_current_user),
 ):
     try:
-        category = await service.get_category_by_id(category_id, current_user)
+        category = await service.get_category_by_id(category_id)
         return response_success(data=CategoryRead.model_validate(category))
     except BaseBusinessException as e:
         return response_error(message=e.message)
@@ -123,10 +113,9 @@ async def update_category(
     category_id: UUID,
     category_in: CategoryUpdate,
     service: CategoryService = Depends(get_category_service),
-    current_user: UserContext = Depends(get_current_user),
 ):
     try:
-        updated_category = await service.update_category(category_id, category_in, current_user)
+        updated_category = await service.update_category(category_id, category_in)
         return response_success(data=CategoryRead.model_validate(updated_category), message="分类更新成功")
     except BaseBusinessException as e:
         return response_error(message=e.message)
@@ -142,10 +131,9 @@ async def update_category(
 async def delete_category(
     category_id: UUID,
     service: CategoryService = Depends(get_category_service),
-    current_user: UserContext = Depends(get_current_user),
 ):
     try:
-        await service.delete_category(category_id, current_user)
+        await service.delete_category(category_id)
         return response_success(data=None, message="分类删除成功")
     except BaseBusinessException as e:
         return response_error(message=e.message)

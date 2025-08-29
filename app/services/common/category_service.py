@@ -13,7 +13,7 @@ from app.repo.crud.common.category_repo import CategoryRepository
 from app.repo.crud.common.base_repo import PageResponse
 from app.services._base_service import BaseService
 from app.schemas.users.user_context import UserContext
-from app.core.permissions.common.category_permission import category_policy  # 假设已创建
+from app.core.permissions.category.category_permission import category_policy  # 假设已创建
 
 
 class CategoryService(BaseService):
@@ -28,7 +28,7 @@ class CategoryService(BaseService):
 
         # 将用户上下文传递给 repo 以实现自动化的审计字段填充
         user_context_dict = {"user_id": self.current_user.id if self.current_user else None}
-        self.category_repo: CategoryRepository = factory.get_repo_by_type(CategoryRepository, context=user_context_dict)
+        self.category_repo: CategoryRepository = factory.get_repo_by_type(CategoryRepository)
 
     async def get_category_by_id(self, category_id: UUID) -> Category:
         """获取单个分类，未找到则抛出异常。"""
@@ -46,7 +46,7 @@ class CategoryService(BaseService):
         """获取完整的分类树，并转换为 DTO。"""
         # 权限检查
         if self.current_user:
-            category_policy.can_list(self.current_user)
+            category_policy.can_list(self.current_user, Category)
 
         root_categories_orm = await self.category_repo.get_category_tree()
 

@@ -43,7 +43,8 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
         这是一个非常实用的方法，用于前端需要展示层级结构的地方，如树形选择器。
         它通过一次查询获取所有数据，然后在内存中构建树形结构，性能很高。
         """
-        query = select(self.model).options(selectinload(self.model.children)).order_by(self.model.name)
+        # query = select(self.model).options(selectinload(self.model.children)).order_by(self.model.name)
+        query = select(self.model).order_by(self.model.name)
         result = await self.db.execute(query)
         all_categories = result.scalars().all()
 
