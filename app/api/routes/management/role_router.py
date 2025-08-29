@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, status, Query
 
-from app.api.dependencies.services import get_role_service
+from app.api.dependencies.service_getters.common_service_getter import get_role_service
 from app.api.dependencies.permissions import require_superuser
 from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
 from app.enums.response_codes import ResponseCodeEnum

@@ -1,8 +1,9 @@
-# app/deps/services.py （或 app/services/dependencies.py）
+# app/deps/common_service_getter.py （或 app/services/dependencies.py）
 from fastapi import Depends
 
 
 from app.infra.storage.storage_factory import storage_factory
+
 
 from app.services.file.file_record_service import FileRecordService
 from app.services.file.file_service import FileService
@@ -11,15 +12,15 @@ from app.services.recipes.tag_service import TagService
 from app.services.recipes.unit_service import UnitService
 from app.services.users.permission_service import PermissionService
 from app.services.users.role_service import RoleService
-from app.services.users.user_service import UserService
+
 from app.services.recipes.recipe_service import RecipeService
 from app.services.auth.auth_service import AuthService
 from app.infra.db.get_repo_factory import get_repository_factory, RepositoryFactory
 
-def get_user_service(
-    repo_factory: RepositoryFactory = Depends(get_repository_factory),
-) -> UserService:
-    return UserService(repo_factory=repo_factory, file_service=get_file_service(), file_record_service=get_file_record_service())
+# def get_user_service(
+#     repo_factory: RepositoryFactory = Depends(get_repository_factory),
+# ) -> UserService:
+#     return UserService(repo_factory=repo_factory, file_service=get_file_service(), file_record_service=get_file_record_service())
 
 def get_recipes_service(
     repo_factory: RepositoryFactory = Depends(get_repository_factory),
@@ -68,3 +69,16 @@ def get_unit_service(
 ) -> UnitService:
     """Dependency provider for IngredientService."""
     return UnitService(repo_factory)
+
+
+# def get_category_service(
+#     repo_factory: RepositoryFactory = Depends(get_repository_factory),
+#     # 在这里注入 current_user
+#     current_user: UserContext = Depends(get_current_user),
+# ) -> CategoryService:
+#     """
+#     CategoryService 的依赖提供者。
+#     它会自动解析并注入当前登录的用户信息。
+#     """
+#     # 3. 将注入的 current_user 传递给 Service 的构造函数
+#     return CategoryService(factory=repo_factory, current_user=current_user)

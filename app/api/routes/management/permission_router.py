@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, status, Query
 
-from app.api.dependencies.services import get_permission_service
+from app.api.dependencies.service_getters.common_service_getter import get_permission_service
 from app.api.dependencies.permissions import require_superuser  # 假设的权限依赖
 from app.services.users.permission_service import PermissionService
 from app.schemas.users.permission_schemas import (

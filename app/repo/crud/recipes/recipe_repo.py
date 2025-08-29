@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.common.category_model import RecipeCategoryLink
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
 from app.models.recipes.recipe import (
     Recipe,
@@ -38,6 +39,8 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
                 selectinload(Recipe.cover_image), # 预加载封面图
                 selectinload(Recipe.gallery_images), # 预加载画廊
                 selectinload(Recipe.tags),
+                selectinload(Recipe.categories),  # <-- 如果您有 categories 也要加上
+                selectinload(Recipe.steps),  # 预加载步骤，但不加载步骤的图片(列表页通常不需要)
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),
                 selectinload(Recipe.steps).selectinload(RecipeStep.images), # 预加载步骤及其图片
@@ -231,4 +234,28 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
             self.db.add_all(new_recipe_ingredients)
 
         # 刷新 session，但不提交
+        await self.db.flush()
+
+    async def set_recipe_categories(self, recipe_id: UUID, category_ids: List[UUID]) -> None:
+        """
+        以原子方式设置给定菜谱的所有分类。
+        此方法采用“先删后增”的策略，以确保数据的一致性。
+        """
+        # 1. 删除此菜谱现有的所有分类关联
+        await self.db.execute(
+            delete(RecipeCategoryLink).where(RecipeCategoryLink.recipe_id == recipe_id)
+        )
+
+        # 2. 如果提供了新的分类ID，则批量创建新的关联
+        if category_ids:
+            # 使用 set() 来自动处理前端可能传入的重复ID
+            unique_category_ids = set(category_ids)
+
+            new_links = [
+                RecipeCategoryLink(recipe_id=recipe_id, category_id=cat_id)
+                for cat_id in unique_category_ids
+            ]
+            self.db.add_all(new_links)
+
+        # 将更改刷新到数据库会话中，但不提交事务（由 Service 层负责提交）
         await self.db.flush()

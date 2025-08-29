@@ -159,7 +159,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             .returning(self.model)  # <-- 关键部分
         )
         result = await self.db.execute(stmt)
-        await self.commit()  # 直接更新需要手动提交
+        # await self.commit()  # 直接更新需要手动提交
         return result.scalar_one_or_none()
     # ==========================
     # 数据删除方法 (Delete)

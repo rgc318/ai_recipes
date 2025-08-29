@@ -9,7 +9,7 @@ from app.schemas.auth.auth_schemas import (
     ChangePasswordRequest,
     ResetPasswordRequest, )
 from app.schemas.common.api_response import response_success, response_error, StandardResponse
-from app.api.dependencies.services import get_auth_service
+from app.api.dependencies.service_getters.common_service_getter import get_auth_service
 from app.enums.response_codes import ResponseCodeEnum
 from app.core.logger import logger
 from app.core.exceptions import UserLockedOutException

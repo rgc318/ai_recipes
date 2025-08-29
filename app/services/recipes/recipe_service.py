@@ -9,6 +9,7 @@ from app.core.exceptions import NotFoundException, ConcurrencyConflictException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.recipes.recipe import Recipe
+from app.repo.crud.common.category_repo import CategoryRepository
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeRead  # 导入 RecipeRead
 from app.repo.crud.recipes.recipe_repo import RecipeRepository
@@ -30,6 +31,8 @@ class RecipeService(BaseService):
         self.tag_repo: TagRepository = factory.get_repo_by_type(TagRepository)
         self.ingredient_repo: IngredientRepository = factory.get_repo_by_type(IngredientRepository)
         self.file_repo: FileRecordRepository = factory.get_repo_by_type(FileRecordRepository)
+        self.category_repo: CategoryRepository = factory.get_repo_by_type(CategoryRepository)
+
 
     async def _process_tags(self, tag_inputs: List[Union[UUID, str]]) -> List[UUID]:
         """
@@ -101,6 +104,14 @@ class RecipeService(BaseService):
                 raise NotFoundException("画廊中引用了一个或多个不存在的图片ID")
             await self.recipe_repo.set_recipe_gallery(recipe_orm.id, recipe_in.gallery_image_ids)
 
+        if recipe_in.category_ids is not None:
+            # 校验传入的 category_ids 是否都真实存在
+            if recipe_in.category_ids and not await self.category_repo.are_ids_valid(recipe_in.category_ids):
+                raise NotFoundException("一个或多个指定的分类ID不存在")
+
+            # 调用我们刚刚在 Repository 中创建的新方法
+            await self.recipe_repo.set_recipe_categories(recipe_orm.id, recipe_in.category_ids)
+
     async def get_recipe_details(self, recipe_id: UUID, current_user: Optional[UserContext] = None) -> Recipe:
         recipe = await self.recipe_repo.get_by_id_with_details(recipe_id)
         if not recipe:
@@ -113,7 +124,7 @@ class RecipeService(BaseService):
             self, page: int, per_page: int, sort_by: List[str], filters: Dict[str, Any], current_user: Optional[UserContext] = None
     ) -> PageResponse[RecipeRead]:
         if current_user:
-            recipe_policy.can_list(current_user)
+            recipe_policy.can_list(current_user, Recipe)
         paged_recipes_orm = await self.recipe_repo.get_paged_recipes(
             page=page, per_page=per_page, sort_by=sort_by, filters=filters or {}
         )
@@ -125,7 +136,7 @@ class RecipeService(BaseService):
         recipe_policy.can_create(user_context)
         # 提取用于创建 Recipe 主表的数据
         recipe_data = recipe_in.model_dump(
-            exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids"}
+            exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids", "category_ids"}
         )
 
         try:
@@ -155,7 +166,7 @@ class RecipeService(BaseService):
         # 提取用于更新 Recipe 主表的常规字段
         update_data = recipe_in.model_dump(
             exclude_unset=True,
-            exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids"}
+            exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids", "category_ids"}
         )
 
 

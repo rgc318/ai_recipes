@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query
 
 from app.api.dependencies.permissions import require_superuser, require_verified_user
-from app.api.dependencies.services import get_unit_service
+from app.api.dependencies.service_getters.common_service_getter import get_unit_service
 from app.core.exceptions import BaseBusinessException
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
 from app.schemas.common.page_schemas import PageResponse

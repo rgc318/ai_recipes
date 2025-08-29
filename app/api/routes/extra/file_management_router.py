@@ -7,7 +7,7 @@ from app.enums.response_codes import ResponseCodeEnum
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.file.file_record_schemas import FileRecordRead, FileRecordUpdate, FileFilterParams
 from app.services.file.file_record_service import FileRecordService
-from app.api.dependencies.services import get_file_record_service # 假设您会创建一个对应的依赖注入函数
+from app.api.dependencies.service_getters.common_service_getter import get_file_record_service # 假设您会创建一个对应的依赖注入函数
 
 # ==============================================================================
 #                            API 路由定义

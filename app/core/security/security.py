@@ -4,10 +4,12 @@ from uuid import UUID
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 
-from app.api.dependencies.services import get_user_service
+from app.api.dependencies.service_getters.users_service_getter import get_user_service
 from app.core.exceptions import InvalidTokenException
 from app.schemas.users.user_context import UserContext
 from app.utils.jwt_utils import decode_token, validate_token_type
+
+# 2. 【核心修改】直接导入 Service “类” 和它需要的依赖
 from app.services.users.user_service import UserService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -21,7 +23,7 @@ async def get_current_user(
     if not user_id:
         raise InvalidTokenException(message="Token payload is missing user identifier (sub)")
     validate_token_type(payload, expected="access")
-    user_id: str = payload.get("sub")
+    # user_id: str = payload.get("sub")
 
     user = await user_service.get_user_with_roles(UUID(user_id))
 

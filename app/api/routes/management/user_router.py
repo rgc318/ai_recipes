@@ -11,7 +11,8 @@ from app.schemas.file.file_schemas import PresignedUploadURL, PresignedAvatarReq
 from app.schemas.users.user_context import UserContext
 from app.services.file.file_service import FileService
 from app.services.users.user_service import UserService
-from app.api.dependencies.services import get_user_service, get_file_service
+from app.api.dependencies.service_getters.users_service_getter import get_user_service
+from app.api.dependencies.service_getters.common_service_getter import get_file_service
 from app.schemas.users.user_schemas import UserCreate, UserUpdate, UserRead, UserReadWithRoles, UserUpdateProfile, \
     UserFilterParams, UserPasswordUpdate, BatchDeletePayload
 from app.schemas.common.page_schemas import PageResponse

@@ -6,8 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status, Query
 
-from app.api.dependencies.permissions import require_verified_user  # 假设这是一个通用权限
-from app.api.dependencies.services import get_recipes_service
+from app.api.dependencies.service_getters.common_service_getter import get_recipes_service
 from app.core.exceptions import BaseBusinessException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.core.security.security import get_current_user

@@ -3,6 +3,7 @@ from app.api.routes.extra import file_router, file_management_router
 from app.api.routes.recipes import recipes_router, tag_router, ingredient_router, unit_router
 from app.api.routes.management import user_router, role_router, permission_router
 from app.api.routes.auth import auth_router
+from app.api.routes.common import category_router
 
 api_router = APIRouter()
 
@@ -23,3 +24,4 @@ api_router.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 api_router.include_router(tag_router.router, prefix="/tags", tags=["tags"])
 api_router.include_router(ingredient_router.router, prefix="/ingredient", tags=["ingredient"])
 api_router.include_router(unit_router.router, prefix="/units", tags=["units"])
+api_router.include_router(category_router.router, prefix="/categories", tags=["categories"])

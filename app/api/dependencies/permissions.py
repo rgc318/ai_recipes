@@ -28,7 +28,7 @@ def require_superuser(current_user: UserContext = Depends(get_current_user)) -> 
         )
     return current_user
 
-def require_verified_user(user: User = Depends(get_current_user)) -> User:
+def require_verified_user(user: UserContext = Depends(get_current_user)) -> UserContext:
     if not user.is_verified:
         raise HTTPException(status_code=403, detail="User not verified")
     return user
@@ -67,3 +67,9 @@ def require_permission(permission_name: str):
             )
         return current_user
     return dependency
+
+
+def require_authenticated_user(user: UserContext = Depends(get_current_user)) -> UserContext:
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="User not verified")
+    return user
