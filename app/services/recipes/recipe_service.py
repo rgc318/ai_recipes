@@ -86,7 +86,7 @@ class RecipeService(BaseService):
             # 【优化】只有当列表不为空时才进行数据库校验
             if all_image_ids and not await self.file_repo.are_ids_valid(list(set(all_image_ids))):
                 raise NotFoundException("步骤中引用了一个或多个不存在的图片ID")
-            await self.recipe_repo.set_recipe_steps(recipe_orm.id, recipe_in.steps)
+            await self.recipe_repo.set_recipe_steps(recipe_orm, recipe_in.steps)
 
         # 4. 处理封面图片
         # 使用 hasattr 检查是因为 RecipeUpdate 中它是可选的

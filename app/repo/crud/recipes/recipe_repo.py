@@ -105,32 +105,43 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
     # ==========================
     # 关联关系更新方法 (由 Service 层在事务中调用)
     # ==========================
-    async def set_recipe_steps(self, recipe_id: UUID, steps_data: List[RecipeStepInput]) -> None:
-        """【优化版】重新设置一个菜谱的所有步骤，采用批量操作以提升性能。"""
-        await self.db.execute(delete(RecipeStep).where(RecipeStep.recipe_id == recipe_id))
-        await self.db.flush()
-
-        if not steps_data:
-            return
-
-        # --- 第一轮：批量创建所有 Step 对象 ---
-        new_steps_map = {}  # 用一个字典来保存新创建的 step 和它对应的输入数据
+    async def set_recipe_steps(self, recipe: Recipe, steps_data: List[RecipeStepInput]) -> None:
+        """
+        【ORM模式】重新设置一个菜谱的所有步骤。
+        通过直接替换 ORM 对象的列表，并利用 cascade 来实现删除和新增。
+        """
+        # 1. 根据输入数据，创建一批全新的 RecipeStep ORM 对象
+        new_steps = []
         for i, step_in in enumerate(steps_data):
+            # 创建新的 step 对象
             step = RecipeStep(
-                recipe_id=recipe_id,
+                recipe_id=recipe.id,
                 step_number=i + 1,
-                instruction=step_in.instruction
+                instruction=step_in.instruction,
+                duration=step_in.duration,
+                # 注意：图片关联需要新策略
             )
-            self.db.add(step)
-            new_steps_map[step] = step_in  # 建立 ORM 对象和输入 DTO 的映射
 
-        # --- 一次性 Flush ---
-        # 这一步会执行所有 INSERT 语句，并为所有 new_steps 对象填充数据库生成的 ID
+            # 处理图片关联：我们需要先将新 step 对象 flush 到 session 中以获取 ID
+            # 为了简化，我们暂时先不处理图片
+            # (一个更完整的实现需要在这里 flush 和刷新 step 对象)
+            new_steps.append(step)
+
+        # 2. 【核心】直接用新列表替换掉菜谱对象上的旧列表
+        recipe.steps = new_steps
+
+        # 3. 将菜谱对象添加到会话中，让 SQLAlchemy 计算差异
+        # SQLAlchemy 会自动发现：
+        # - 旧的 step 对象不在新列表中了 -> 删除它们 (因为有 delete-orphan)
+        # - 新的 step 对象是新来的 -> 插入它们
+        self.db.add(recipe)
         await self.db.flush()
 
-        # --- 第二轮：批量创建所有图片关联 ---
+        # --- 处理图片关联 (新逻辑) ---
+        # 在 flush 之后，new_steps 里的每个 step 对象都有了ID
         image_links_to_add = []
-        for step_orm, step_in_data in new_steps_map.items():
+        for i, step_orm in enumerate(new_steps):
+            step_in_data = steps_data[i]  # 找到对应的输入数据
             if step_in_data.image_ids:
                 for img_id in set(step_in_data.image_ids):
                     image_links_to_add.append(

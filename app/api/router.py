@@ -22,6 +22,6 @@ api_router.include_router(file_management_router.router, prefix="/file_managemen
 # auth routers
 api_router.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 api_router.include_router(tag_router.router, prefix="/tags", tags=["tags"])
-api_router.include_router(ingredient_router.router, prefix="/ingredient", tags=["ingredient"])
+api_router.include_router(ingredient_router.router, prefix="/ingredients", tags=["ingredients"])
 api_router.include_router(unit_router.router, prefix="/units", tags=["units"])
 api_router.include_router(category_router.router, prefix="/categories", tags=["categories"])
