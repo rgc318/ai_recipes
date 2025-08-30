@@ -30,10 +30,10 @@ class RecipeStep(BaseModel, table=True):
     """结构化的烹饪步骤模型。"""
     __tablename__ = "recipe_step"
 
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     recipe_id: uuid.UUID = Field(foreign_key="recipe.id")
     step_number: int = Field(..., description="步骤序号, 从1开始")
     instruction: str = Field(..., description="这一步的具体操作文本")
+    duration: Optional[str] = Field(None, description="此步骤预计花费的时间, e.g., '10分钟'")
 
     # 一个步骤可以有多张图片
     images: List["FileRecord"] = Relationship(link_model=RecipeStepImageLink)
@@ -68,7 +68,7 @@ class RecipeIngredient(AutoTableNameMixin, SQLModel,  table=True):
     recipe_id: uuid.UUID = Field(foreign_key="recipe.id", sa_type=GUID())
     ingredient_id: uuid.UUID = Field(foreign_key="ingredient.id", sa_type=GUID())
     unit_id: Optional[uuid.UUID] = Field(default=None, foreign_key="unit.id", sa_type=GUID())
-
+    group: Optional[str] = Field(None, description="配料分组名, e.g., '面团部分'")
     quantity: Optional[float] = Field(default=None)
     note: Optional[str] = None
 
@@ -84,13 +84,15 @@ class Recipe(BaseModel, table=True):
     prep_time: Optional[str] = Field(None, description="准备时间, e.g., '15分钟'")
     cook_time: Optional[str] = Field(None, description="烹饪时间, e.g., '30分钟'")
     servings: Optional[str] = Field(None, description="份量, e.g., '2-3人份'")
-
+    difficulty: Optional[str] = Field(None, description="难度等级")
+    equipment: Optional[str] = Field(None, description="所需厨具清单, 用换行符分隔")
     cover_image_id: Optional[uuid.UUID] = Field(default=None, foreign_key="file_record.id")
     cover_image: Optional["FileRecord"] = Relationship(
         sa_relationship_kwargs={
             "primaryjoin": "Recipe.cover_image_id == FileRecord.id",
         }
     )
+    author_notes: Optional[str] = Field(None, description="作者小贴士")
     # 2. 图片画廊 (多对多关系)
     gallery_images: List["FileRecord"] = Relationship(link_model=RecipeGalleryLink)
 

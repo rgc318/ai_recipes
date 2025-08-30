@@ -15,6 +15,7 @@ from app.schemas.common.category_schemas import CategoryRead
 class RecipeStepInput(BaseModel):
     """用于创建/更新菜谱时，输入的单个步骤的数据结构。"""
     instruction: str
+    duration: Optional[str] = Field(None, description="此步骤预计花费的时间, e.g., '10分钟'")
     image_ids: Optional[List[UUID]] = Field(None, description="关联到此步骤的图片(FileRecord)ID列表")
 
 class RecipeStepRead(BaseModel):
@@ -22,6 +23,7 @@ class RecipeStepRead(BaseModel):
     id: UUID
     step_number: int
     instruction: str
+    duration: Optional[str] = Field(None, description="此步骤预计花费的时间, e.g., '10分钟'")
     images: List[FileRecordRead] = [] # 返回完整的图片信息
     model_config = {"from_attributes": True}
 
@@ -66,12 +68,14 @@ class IngredientRead(IngredientBase):
 class RecipeIngredientInput(BaseModel):
     ingredient_id: UUID
     unit_id: Optional[UUID] = None
+    group: Optional[str] = Field(None, description="配料分组名, e.g., '面团部分'")
     quantity: Optional[float] = None
     note: Optional[str] = None
 
 
 class RecipeIngredientRead(BaseModel):
     id: UUID
+    group: Optional[str] = Field(None, description="配料分组名, e.g., '面团部分'")
     quantity: Optional[float] = None
     note: Optional[str] = None
     ingredient: IngredientRead
@@ -87,7 +91,9 @@ class RecipeBase(BaseModel):
     prep_time: Optional[str] = None
     cook_time: Optional[str] = None
     servings: Optional[str] = None
-
+    difficulty: Optional[str] = Field(None, description="难度等级")
+    equipment: Optional[str] = Field(None, description="所需厨具清单, 用换行符分隔")
+    author_notes: Optional[str] = Field(None, description="作者小贴士")
 
 # =================================================================
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修改点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
@@ -105,14 +111,22 @@ class RecipeCreate(RecipeBase):
     category_ids: Optional[List[UUID]] = Field(None, description="关联的分类ID列表")
 
 
-class RecipeUpdate(BaseModel):
-    """更新菜谱的请求体 (V3 - 结构化版)。"""
+class RecipeUpdate(RecipeBase):  # 【修改】让 RecipeUpdate 继承自 RecipeBase
+    """更新菜谱的请求体 (V3 - 结构化版)，所有字段均为可选。"""
+    # RecipeBase 中的所有字段 (title, description, difficulty等) 自动继承
+    # 并且我们需要将它们全部变为可选
     title: Optional[str] = None
     description: Optional[str] = None
+    prep_time: Optional[str] = None
+    cook_time: Optional[str] = None
+    servings: Optional[str] = None
+    difficulty: Optional[str] = None
+    equipment: Optional[str] = None
+    author_notes: Optional[str] = None
+
+    # 关联关系字段保持不变
     tags: Optional[List[Union[UUID, str]]] = None
     ingredients: Optional[List[RecipeIngredientInput]] = None
-
-    # 【新增】接收结构化数据
     cover_image_id: Optional[UUID] = None
     gallery_image_ids: Optional[List[UUID]] = None
     steps: Optional[List[RecipeStepInput]] = None
