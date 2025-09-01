@@ -3,7 +3,7 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -106,3 +106,22 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
         return await self.get_paged_list(
             page=page, per_page=per_page, filters=filters, sort_by=sort_by
         )
+
+    async def are_ids_valid(self, ids: List[UUID]) -> bool:
+        """
+        高效地检查一组ID是否都存在于 category 表中。
+        """
+        if not ids:
+            return True  # 如果传入空列表，视为有效
+
+        # 使用 set 去重，以防传入重复ID
+        unique_ids = set(ids)
+
+        # 构建查询，只查询符合条件的ID的数量
+        stmt = select(func.count(self.model.id)).where(self.model.id.in_(unique_ids))
+
+        result = await self.db.execute(stmt)
+        existing_count = result.scalar_one()
+
+        # 如果数据库中存在的数量与我们传入的唯一ID数量相等，则所有ID都有效
+        return existing_count == len(unique_ids)

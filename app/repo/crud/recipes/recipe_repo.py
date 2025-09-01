@@ -7,7 +7,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.common.category_model import RecipeCategoryLink
+from app.models.common.category_model import RecipeCategoryLink, Category
+from app.models.files.file_record import FileRecord
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
 from app.models.recipes.recipe import (
     Recipe,
@@ -15,7 +16,7 @@ from app.models.recipes.recipe import (
     Ingredient,  # 导入 Ingredient 用于 JOIN
     # 导入 Tag 用于 JOIN
     RecipeTagLink,
-    Unit, RecipeStep, RecipeStepImageLink, RecipeGalleryLink,
+    Unit, RecipeStep, RecipeStepImageLink, RecipeGalleryLink, Tag,
 )
 from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeIngredientInput, RecipeStepInput
 
@@ -43,7 +44,6 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
                 selectinload(Recipe.steps).selectinload(RecipeStep.images),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),
-                selectinload(Recipe.steps).selectinload(RecipeStep.images), # 预加载步骤及其图片
             )
         )
         result = await self.db.execute(stmt)
@@ -106,167 +106,94 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
     # 关联关系更新方法 (由 Service 层在事务中调用)
     # ==========================
     async def set_recipe_steps(self, recipe: Recipe, steps_data: List[RecipeStepInput]) -> None:
-        """
-        【ORM模式】重新设置一个菜谱的所有步骤。
-        通过直接替换 ORM 对象的列表，并利用 cascade 来实现删除和新增。
-        """
-        # 1. 根据输入数据，创建一批全新的 RecipeStep ORM 对象
-        new_steps = []
-        for i, step_in in enumerate(steps_data):
-            # 创建新的 step 对象
-            step = RecipeStep(
-                recipe_id=recipe.id,
-                step_number=i + 1,
+        """【ORM模式】重新设置菜谱的所有步骤。"""
+        # 1. 先删除旧的图片关联，步骤本身由 cascade='delete-orphan' 自动处理
+        if recipe.steps:
+            step_ids = [step.id for step in recipe.steps if step.id]
+            if step_ids:
+                await self.db.execute(delete(RecipeStepImageLink).where(RecipeStepImageLink.step_id.in_(step_ids)))
+                await self.db.flush()
+
+        # 2. 创建全新的 RecipeStep ORM 对象列表
+        new_steps = [
+            RecipeStep(
                 instruction=step_in.instruction,
                 duration=step_in.duration,
-                # 注意：图片关联需要新策略
-            )
+                step_number=i + 1,
+            ) for i, step_in in enumerate(steps_data)
+        ]
 
-            # 处理图片关联：我们需要先将新 step 对象 flush 到 session 中以获取 ID
-            # 为了简化，我们暂时先不处理图片
-            # (一个更完整的实现需要在这里 flush 和刷新 step 对象)
-            new_steps.append(step)
-
-        # 2. 【核心】直接用新列表替换掉菜谱对象上的旧列表
+        # 3. 直接用新列表替换，ORM会自动处理删除旧步骤和插入新步骤
         recipe.steps = new_steps
-
-        # 3. 将菜谱对象添加到会话中，让 SQLAlchemy 计算差异
-        # SQLAlchemy 会自动发现：
-        # - 旧的 step 对象不在新列表中了 -> 删除它们 (因为有 delete-orphan)
-        # - 新的 step 对象是新来的 -> 插入它们
         self.db.add(recipe)
-        await self.db.flush()
+        await self.db.flush()  # flush后, new_steps中的每个对象都会获得ID
 
-        # --- 处理图片关联 (新逻辑) ---
-        # 在 flush 之后，new_steps 里的每个 step 对象都有了ID
+        # 4. 为新步骤创建图片关联
         image_links_to_add = []
         for i, step_orm in enumerate(new_steps):
-            step_in_data = steps_data[i]  # 找到对应的输入数据
+            step_in_data = steps_data[i]
             if step_in_data.image_ids:
                 for img_id in set(step_in_data.image_ids):
                     image_links_to_add.append(
                         RecipeStepImageLink(step_id=step_orm.id, file_id=img_id)
                     )
-
         if image_links_to_add:
             self.db.add_all(image_links_to_add)
 
         await self.db.flush()
 
-    async def set_recipe_gallery(self, recipe_id: UUID, image_ids: List[UUID]) -> None:
-        """【新增】重新设置菜谱的图片画廊。"""
-        await self.db.execute(delete(RecipeGalleryLink).where(RecipeGalleryLink.recipe_id == recipe_id))
+    async def set_recipe_gallery(self, recipe: Recipe, image_ids: List[UUID]) -> None:
+        """【ORM模式】重新设置菜谱的图片画廊。"""
         if image_ids:
-            links = [
-                RecipeGalleryLink(recipe_id=recipe_id, file_id=img_id, display_order=i)
-                for i, img_id in enumerate(image_ids)
-            ]
-            self.db.add_all(links)
+            images_map = {}
+            if image_ids:
+                images_result = await self.db.execute(select(FileRecord).where(FileRecord.id.in_(image_ids)))
+                images_map = {img.id: img for img in images_result.scalars()}
+
+            # 保持前端传入的顺序
+            recipe.gallery_images = [images_map[img_id] for img_id in image_ids if img_id in images_map]
+        else:
+            recipe.gallery_images = []
+        self.db.add(recipe)
         await self.db.flush()
 
     async def update_cover_image(self, recipe: Recipe, cover_image_id: Optional[UUID]) -> None:
-        """【新增】更新菜谱的封面图片。"""
+        """更新菜谱的封面图片。"""
         recipe.cover_image_id = cover_image_id
         self.db.add(recipe)
         await self.db.flush()
-    async def set_recipe_tags(self, recipe_id: UUID, tag_ids: List[UUID]) -> None:
-        """
-        【原子化操作】重新设置一个菜谱的所有标签。
-        采用“先删后增”策略。此方法不提交事务。
-        """
-        # 1. 删除现有所有关联
-        await self.db.execute(
-            delete(RecipeTagLink).where(RecipeTagLink.recipe_id == recipe_id)
-        )
-
-        # 2. 如果提供了新的标签ID，则批量插入新关联
+    async def set_recipe_tags(self, recipe: Recipe, tag_ids: List[UUID]) -> None:
+        """【ORM模式】重新设置菜谱的所有标签。"""
         if tag_ids:
-            # 使用 set 去重，防止意外传入重复ID
-            unique_tag_ids = set(tag_ids)
-            links = [
-                RecipeTagLink(recipe_id=recipe_id, tag_id=tag_id)
-                for tag_id in unique_tag_ids
-            ]
-            self.db.add_all(links)
-
-        # 刷新 session，但不提交
+            # Service层已校验过ID，这里直接查询
+            tags_result = await self.db.execute(select(Tag).where(Tag.id.in_(tag_ids)))
+            recipe.tags = tags_result.scalars().all()
+        else:
+            recipe.tags = [] # 如果传入空列表，则清空关系
+        self.db.add(recipe)
         await self.db.flush()
 
-    async def set_recipe_ingredients(
-            self, recipe_id: UUID, ingredients_data: List[RecipeIngredientInput]
-    ) -> None:
-        """
-        【高性能】重新设置一个菜谱的所有配料。
-        采用“先删后增”策略，并优化了查询性能。此方法不提交事务。
-        """
-        # 1. 删除现有所有配料记录
-        await self.db.execute(
-            delete(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe_id)
-        )
-        await self.db.flush()  # 确保删除先生效
-
-        if not ingredients_data:
-            return
-
-        # 2. 【性能优化】一次性获取所有需要的 Ingredient 和 Unit 对象
-        ingredient_ids = {item.ingredient_id for item in ingredients_data}
-        unit_ids = {item.unit_id for item in ingredients_data if item.unit_id}
-
-        # 批量获取食材对象，并存入字典以供快速查找
-        ing_stmt = select(Ingredient).where(Ingredient.id.in_(ingredient_ids))
-        ing_result = await self.db.execute(ing_stmt)
-        ingredients_map = {ing.id: ing for ing in ing_result.scalars()}
-
-        # 批量获取单位对象
-        units_map = {}
-        if unit_ids:
-            unit_stmt = select(Unit).where(Unit.id.in_(unit_ids))
-            unit_result = await self.db.execute(unit_stmt)
-            units_map = {unit.id: unit for unit in unit_result.scalars()}
-
-        # 3. 构建新的 RecipeIngredient 对象列表
-        new_recipe_ingredients = []
-        for item in ingredients_data:
-            # 校验 ingredient_id 是否有效（在已获取的 map 中）
-            if item.ingredient_id in ingredients_map:
-                new_recipe_ingredients.append(
-                    RecipeIngredient(
-                        recipe_id=recipe_id,
-                        ingredient_id=item.ingredient_id,
-                        # 校验 unit_id 是否有效
-                        unit_id=item.unit_id if item.unit_id in units_map else None,
-                        quantity=item.quantity,
-                        note=item.note,
-                    )
-                )
-
-        # 4. 批量添加到 session
-        if new_recipe_ingredients:
-            self.db.add_all(new_recipe_ingredients)
-
-        # 刷新 session，但不提交
+    async def set_recipe_ingredients(self, recipe: Recipe, ingredients_data: List[RecipeIngredientInput]) -> None:
+        """【ORM模式】重新设置菜谱的所有配料。"""
+        new_ingredients = [
+            RecipeIngredient(
+                ingredient_id=item.ingredient,
+                unit_id=item.unit_id,
+                group=item.group,
+                quantity=item.quantity,
+                note=item.note,
+            ) for item in ingredients_data
+        ]
+        recipe.ingredients = new_ingredients
+        self.db.add(recipe)
         await self.db.flush()
 
-    async def set_recipe_categories(self, recipe_id: UUID, category_ids: List[UUID]) -> None:
-        """
-        以原子方式设置给定菜谱的所有分类。
-        此方法采用“先删后增”的策略，以确保数据的一致性。
-        """
-        # 1. 删除此菜谱现有的所有分类关联
-        await self.db.execute(
-            delete(RecipeCategoryLink).where(RecipeCategoryLink.recipe_id == recipe_id)
-        )
-
-        # 2. 如果提供了新的分类ID，则批量创建新的关联
+    async def set_recipe_categories(self, recipe: Recipe, category_ids: List[UUID]) -> None:
+        """【ORM模式】重新设置菜谱的所有分类。"""
         if category_ids:
-            # 使用 set() 来自动处理前端可能传入的重复ID
-            unique_category_ids = set(category_ids)
-
-            new_links = [
-                RecipeCategoryLink(recipe_id=recipe_id, category_id=cat_id)
-                for cat_id in unique_category_ids
-            ]
-            self.db.add_all(new_links)
-
-        # 将更改刷新到数据库会话中，但不提交事务（由 Service 层负责提交）
+            categories_result = await self.db.execute(select(Category).where(Category.id.in_(category_ids)))
+            recipe.categories = categories_result.scalars().all()
+        else:
+            recipe.categories = []
+        self.db.add(recipe)
         await self.db.flush()

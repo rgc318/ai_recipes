@@ -546,4 +546,19 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
                 stmt = stmt.where(or_(*or_clauses))
 
         return stmt
+
+    async def are_ids_valid(self, ids: List[UUID]) -> bool:
+        """
+        【通用方法】高效地检查一组ID是否都存在于当前模型对应的表中。
+        """
+        if not ids:
+            return True
+
+        unique_ids = set(ids)
+        stmt = select(func.count(self.model.id)).where(self.model.id.in_(unique_ids))
+
+        result = await self.db.execute(stmt)
+        existing_count = result.scalar_one()
+
+        return existing_count == len(unique_ids)
     # =================================================================
