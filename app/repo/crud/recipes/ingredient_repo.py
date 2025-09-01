@@ -15,6 +15,39 @@ class IngredientRepository(BaseRepository[Ingredient, IngredientCreate, Ingredie
     def __init__(self, db: AsyncSession, context: Optional[Dict[str, Any]] = None):
         super().__init__(db=db, model=Ingredient, context=context)
 
+    def _normalize_name(self, name: str) -> str:
+        """内部辅助方法，用于统一处理名称的标准化逻辑。"""
+        return name.strip().lower()
+
+    async def find_or_create(self, name: str) -> Ingredient:
+        """
+        根据名称查找食材，如果不存在，则创建一个新的。
+        这是一个原子性的操作，被 RecipeService 依赖。
+        """
+        # 1. 对输入名称进行标准化处理
+        normalized_name = self._normalize_name(name)
+
+        # 2. 尝试根据标准化名称查找已存在的食材
+        existing_ingredient = await self.find_by_normalized_name(normalized_name)
+
+        # 3. 如果找到了，直接返回
+        if existing_ingredient:
+            return existing_ingredient
+
+        # 4. 如果没找到，则创建新的食材
+        #    注意：我们同时填充了 name 和 normalized_name
+        new_ingredient_data = {
+            "name": name.strip(),
+            "normalized_name": normalized_name
+        }
+
+        # 5. 调用基类的 create 方法来执行创建
+        new_ingredient = await self.create(new_ingredient_data)
+
+        return new_ingredient
+
+    # =================================================================
+
     async def find_by_normalized_name(self, normalized_name: str) -> Optional[Ingredient]:
         """
         根据标准化名称精确查找食材。
@@ -46,3 +79,4 @@ class IngredientRepository(BaseRepository[Ingredient, IngredientCreate, Ingredie
         return await self.get_paged_list(
             page=page, per_page=per_page, filters=filters, sort_by=sort_by
         )
+

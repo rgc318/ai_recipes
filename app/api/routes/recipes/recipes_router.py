@@ -16,7 +16,7 @@ from app.schemas.recipes.recipe_schemas import (
     RecipeRead,
     RecipeCreate,
     RecipeUpdate,
-    RecipeFilterParams, # 我们需要为 Recipe 创建一个 FilterParams
+    RecipeFilterParams, RecipeSummaryRead,  # 我们需要为 Recipe 创建一个 FilterParams
 )
 from app.schemas.users.user_context import UserContext
 from app.schemas.users.user_schemas import BatchDeletePayload
@@ -54,7 +54,7 @@ async def create_recipe(
 
 @router.get(
     "/",
-    response_model=StandardResponse[PageResponse[RecipeRead]],
+    response_model=StandardResponse[PageResponse[RecipeSummaryRead]],
     summary="动态分页、排序和过滤菜谱列表",
 )
 async def list_recipes_paginated(

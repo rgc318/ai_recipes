@@ -57,7 +57,7 @@ class Unit(BaseModel, table=True):
 class Ingredient(BaseModel, table=True):
     name: str
     description: Optional[str] = None
-    normalized_name: Optional[str] = Field(default=None, index=True)
+    normalized_name: Optional[str] = Field(default=None, index=True, unique=True)
     plural_name: Optional[str] = None
 
 
@@ -105,7 +105,14 @@ class Recipe(BaseModel, table=True):
         }
     )
 
-    ingredients: List["RecipeIngredient"] = Relationship(back_populates="recipe")
+    ingredients: List["RecipeIngredient"] = Relationship(
+        back_populates="recipe",
+        # 【核心修改】添加这一行 sa_relationship_kwargs
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan"
+        }
+    )
+
     tags: List["Tag"] = Relationship(back_populates="recipes", link_model=RecipeTagLink)
     categories: List["Category"] = Relationship(back_populates="recipes", link_model=RecipeCategoryLink)
 
