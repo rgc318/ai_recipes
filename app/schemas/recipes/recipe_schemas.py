@@ -66,7 +66,7 @@ class IngredientRead(IngredientBase):
 
 # === RecipeIngredient ===
 class RecipeIngredientInput(BaseModel):
-    ingredient_id: UUID
+    ingredient: Union[UUID, str] = Field(..., description="已存在的食材ID或新的食材名称")
     unit_id: Optional[UUID] = None
     group: Optional[str] = Field(None, description="配料分组名, e.g., '面团部分'")
     quantity: Optional[float] = None
@@ -151,6 +151,22 @@ class RecipeRead(RecipeBase):
 
     model_config = {"from_attributes": True}
 
+
+class RecipeSummaryRead(RecipeBase):
+    """
+    用于【列表页】的菜谱摘要数据模型。
+    只包含列表展示所必需的字段，不包含步骤、配料等重型数据。
+    """
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    # 列表页通常需要封面、标签和分类用于展示和筛选
+    cover_image: Optional[FileRecordRead] = None
+    tags: List[TagRead] = []
+    categories: List["CategoryRead"] = []
+
+    model_config = {"from_attributes": True}
 
 class RecipeFilterParams(BaseModel):
     title: Optional[str] = Field(None, description="按菜谱标题进行模糊搜索")

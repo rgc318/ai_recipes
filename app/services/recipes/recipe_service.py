@@ -8,10 +8,11 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.exceptions import NotFoundException, ConcurrencyConflictException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.recipes.recipe import Recipe
+from app.models.recipes.recipe import Recipe, RecipeIngredient
 from app.repo.crud.common.category_repo import CategoryRepository
 from app.repo.crud.file.file_record_repo import FileRecordRepository
-from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeRead  # 导入 RecipeRead
+from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeRead, \
+    RecipeSummaryRead, RecipeIngredientInput  # 导入 RecipeRead
 from app.repo.crud.recipes.recipe_repo import RecipeRepository
 from app.repo.crud.recipes.tag_repo import TagRepository  # 假设已存在
 from app.repo.crud.recipes.ingredient_repo import IngredientRepository  # 假设已存在
@@ -63,6 +64,49 @@ class RecipeService(BaseService):
 
         return list(final_tag_ids)
 
+    async def _process_ingredients(self, ingredients_data: List[RecipeIngredientInput]) -> List[RecipeIngredient]:
+        """
+        【新增】智能处理食材输入，支持即创即用。
+        返回的是可以直接存入数据库的 ORM 对象列表。
+        """
+        if not ingredients_data:
+            return []
+
+        processed_ingredients_orm = []
+        ingredient_ids_to_validate = []
+
+        # 1. 分离 UUID 和字符串，并提前创建新食材
+        for item_in in ingredients_data:
+            ingredient_value = item_in.ingredient
+            ingredient_id = None
+
+            if isinstance(ingredient_value, UUID):
+                ingredient_ids_to_validate.append(ingredient_value)
+                ingredient_id = ingredient_value
+            elif isinstance(ingredient_value, str) and ingredient_value.strip():
+                ingredient_orm = await self.ingredient_repo.find_or_create(ingredient_value.strip())
+                ingredient_id = ingredient_orm.id
+
+            if not ingredient_id:
+                continue
+
+            # 2. 构建 RecipeIngredient ORM 对象（注意不是 Input Schema）
+            processed_ingredients_orm.append(
+                RecipeIngredient(
+                    ingredient_id=ingredient_id,
+                    unit_id=item_in.unit_id,
+                    group=item_in.group,
+                    quantity=item_in.quantity,
+                    note=item_in.note
+                )
+            )
+
+        # 3. 对所有传入的 UUID 进行一次性有效性校验
+        if ingredient_ids_to_validate and not await self.ingredient_repo.are_ids_valid(ingredient_ids_to_validate):
+            raise NotFoundException("一个或多个指定的食材ID不存在")
+
+        return processed_ingredients_orm
+
     async def _handle_recipe_relations(
             self, recipe_orm: Recipe, recipe_in: Union[RecipeCreate, RecipeUpdate]
     ):
@@ -74,11 +118,12 @@ class RecipeService(BaseService):
 
         # 2. 处理配料
         if recipe_in.ingredients is not None:
-            ingredient_ids = [ing.ingredient_id for ing in recipe_in.ingredients]
-            # 【优化】只有当列表不为空时才进行数据库校验
-            if ingredient_ids and not await self.ingredient_repo.are_ids_valid(ingredient_ids):
-                raise NotFoundException("一个或多个指定的食材不存在")
-            await self.recipe_repo.set_recipe_ingredients(recipe_orm.id, recipe_in.ingredients)
+            # 调用新的“翻译官”方法，它会返回一个可以直接使用的 ORM 对象列表
+            processed_ingredient_orms = await self._process_ingredients(recipe_in.ingredients)
+            # 使用 ORM 列表替换模式来更新配料
+            recipe_orm.ingredients = processed_ingredient_orms
+            self.recipe_repo.db.add(recipe_orm)
+            await self.recipe_repo.db.flush()
 
         # 3. 处理结构化步骤
         if recipe_in.steps is not None:
@@ -122,13 +167,13 @@ class RecipeService(BaseService):
 
     async def page_list_recipes(
             self, page: int, per_page: int, sort_by: List[str], filters: Dict[str, Any], current_user: Optional[UserContext] = None
-    ) -> PageResponse[RecipeRead]:
+    ) -> PageResponse[RecipeSummaryRead]:
         if current_user:
             recipe_policy.can_list(current_user, Recipe)
         paged_recipes_orm = await self.recipe_repo.get_paged_recipes(
             page=page, per_page=per_page, sort_by=sort_by, filters=filters or {}
         )
-        paged_recipes_orm.items = [RecipeRead.model_validate(item) for item in paged_recipes_orm.items]
+        paged_recipes_orm.items = [RecipeSummaryRead.model_validate(item) for item in paged_recipes_orm.items]
         return paged_recipes_orm
 
     async def create_recipe(self, recipe_in: RecipeCreate, user_context: UserContext) -> Recipe:
