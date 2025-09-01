@@ -64,36 +64,53 @@ class RecipeService(BaseService):
 
         return list(final_tag_ids)
 
-    async def _process_ingredients(self, ingredients_data: List[RecipeIngredientInput]) -> List[RecipeIngredient]:
+    async def _process_ingredients(self, ingredients_data: List[RecipeIngredientInput]) -> List[RecipeIngredientInput]:
         """
-        【新增】智能处理食材输入，支持即创即用。
-        返回的是可以直接存入数据库的 ORM 对象列表。
+        【最终修正版】智能处理食材输入，支持即创即用，并能正确处理前端传回的已选定对象。
         """
         if not ingredients_data:
             return []
 
-        processed_ingredients_orm = []
-        ingredient_ids_to_validate = []
+        processed_ingredients_dto = []
 
-        # 1. 分离 UUID 和字符串，并提前创建新食材
         for item_in in ingredients_data:
             ingredient_value = item_in.ingredient
             ingredient_id = None
 
+            # 1. 如果是 UUID，直接使用
             if isinstance(ingredient_value, UUID):
-                ingredient_ids_to_validate.append(ingredient_value)
                 ingredient_id = ingredient_value
+            # 2. 如果是字符串，查找或创建
             elif isinstance(ingredient_value, str) and ingredient_value.strip():
-                ingredient_orm = await self.ingredient_repo.find_or_create(ingredient_value.strip())
-                ingredient_id = ingredient_orm.id
+                cleaned_value = ingredient_value.strip()
+                if not cleaned_value:
+                    continue
+
+                # 尝试将字符串解析为 UUID
+                try:
+                    # 如果这行代码成功执行，说明它是一个有效的 UUID 字符串
+                    ingredient_id = UUID(cleaned_value)
+                except ValueError:
+                    # 如果解析失败 (说明它不是UUID格式)，那么它就是一个普通的配料名
+                    # 执行“查找或创建”逻辑
+                    ingredient_orm = await self.ingredient_repo.find_or_create(cleaned_value)
+                    ingredient_id = ingredient_orm.id
+            # 3. 【新增】如果是字典 (来自 antd Select 的已选项)，提取其 value
+            elif isinstance(ingredient_value, dict) and ingredient_value.get('value'):
+                try:
+                    ingredient_id = UUID(ingredient_value['value'])
+                except (ValueError, TypeError):
+                    # 如果 value 不是合法的 UUID，则忽略
+                    self.logger.warning(f"Invalid UUID format in ingredient object: {ingredient_value}")
+                    continue
 
             if not ingredient_id:
                 continue
 
-            # 2. 构建 RecipeIngredient ORM 对象（注意不是 Input Schema）
-            processed_ingredients_orm.append(
-                RecipeIngredient(
-                    ingredient_id=ingredient_id,
+            # 构建净化后的 DTO
+            processed_ingredients_dto.append(
+                RecipeIngredientInput(
+                    ingredient=ingredient_id,
                     unit_id=item_in.unit_id,
                     group=item_in.group,
                     quantity=item_in.quantity,
@@ -101,61 +118,56 @@ class RecipeService(BaseService):
                 )
             )
 
-        # 3. 对所有传入的 UUID 进行一次性有效性校验
-        if ingredient_ids_to_validate and not await self.ingredient_repo.are_ids_valid(ingredient_ids_to_validate):
+        # 对所有收集到的 UUID 进行一次性有效性校验
+        all_ingredient_ids = [ing.ingredient for ing in processed_ingredients_dto]
+        if all_ingredient_ids and not await self.ingredient_repo.are_ids_valid(all_ingredient_ids):
             raise NotFoundException("一个或多个指定的食材ID不存在")
 
-        return processed_ingredients_orm
+        return processed_ingredients_dto
 
     async def _handle_recipe_relations(
             self, recipe_orm: Recipe, recipe_in: Union[RecipeCreate, RecipeUpdate]
     ):
-        """统一处理所有菜谱关联关系的内部方法。"""
+        """【最终统一版】统一处理所有菜谱关联关系的内部方法。"""
+
         # 1. 处理标签
         if recipe_in.tags is not None:
             final_tag_ids = await self._process_tags(recipe_in.tags)
-            await self.recipe_repo.set_recipe_tags(recipe_orm.id, final_tag_ids)
+            # 【修改】传入 recipe_orm 对象
+            await self.recipe_repo.set_recipe_tags(recipe_orm, final_tag_ids)
 
         # 2. 处理配料
         if recipe_in.ingredients is not None:
-            # 调用新的“翻译官”方法，它会返回一个可以直接使用的 ORM 对象列表
-            processed_ingredient_orms = await self._process_ingredients(recipe_in.ingredients)
-            # 使用 ORM 列表替换模式来更新配料
-            recipe_orm.ingredients = processed_ingredient_orms
-            self.recipe_repo.db.add(recipe_orm)
-            await self.recipe_repo.db.flush()
+            processed_ingredient_orms: List[RecipeIngredient] = await self._process_ingredients(recipe_in.ingredients)
+            await self.recipe_repo.set_recipe_ingredients(recipe_orm, processed_ingredient_orms)
 
-        # 3. 处理结构化步骤
+        # 3. 处理结构化步骤 (此项已是正确的ORM模式，无需修改)
         if recipe_in.steps is not None:
             all_image_ids = [img_id for step in recipe_in.steps if step.image_ids for img_id in step.image_ids]
-            # 【优化】只有当列表不为空时才进行数据库校验
             if all_image_ids and not await self.file_repo.are_ids_valid(list(set(all_image_ids))):
                 raise NotFoundException("步骤中引用了一个或多个不存在的图片ID")
             await self.recipe_repo.set_recipe_steps(recipe_orm, recipe_in.steps)
 
-        # 4. 处理封面图片
-        # 使用 hasattr 检查是因为 RecipeUpdate 中它是可选的
+        # 4. 处理封面图片 (此项操作的是主对象字段，无需修改)
         if hasattr(recipe_in, 'cover_image_id'):
             cover_id = recipe_in.cover_image_id
-            # 【优化】同时处理设置新封面和移除封面(传入None)的场景
             if cover_id and not await self.file_repo.are_ids_valid([cover_id]):
                 raise NotFoundException("指定的封面图片ID不存在")
             await self.recipe_repo.update_cover_image(recipe_orm, cover_id)
 
         # 5. 处理画廊图片
         if recipe_in.gallery_image_ids is not None:
-            # 【优化】只有当列表不为空时才进行数据库校验
             if recipe_in.gallery_image_ids and not await self.file_repo.are_ids_valid(recipe_in.gallery_image_ids):
                 raise NotFoundException("画廊中引用了一个或多个不存在的图片ID")
-            await self.recipe_repo.set_recipe_gallery(recipe_orm.id, recipe_in.gallery_image_ids)
+            # 【修改】传入 recipe_orm 对象
+            await self.recipe_repo.set_recipe_gallery(recipe_orm, recipe_in.gallery_image_ids)
 
+        # 6. 处理分类
         if recipe_in.category_ids is not None:
-            # 校验传入的 category_ids 是否都真实存在
             if recipe_in.category_ids and not await self.category_repo.are_ids_valid(recipe_in.category_ids):
                 raise NotFoundException("一个或多个指定的分类ID不存在")
-
-            # 调用我们刚刚在 Repository 中创建的新方法
-            await self.recipe_repo.set_recipe_categories(recipe_orm.id, recipe_in.category_ids)
+            # 【修改】传入 recipe_orm 对象
+            await self.recipe_repo.set_recipe_categories(recipe_orm, recipe_in.category_ids)
 
     async def get_recipe_details(self, recipe_id: UUID, current_user: Optional[UserContext] = None) -> Recipe:
         recipe = await self.recipe_repo.get_by_id_with_details(recipe_id)
