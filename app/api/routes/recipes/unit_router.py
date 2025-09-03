@@ -52,12 +52,21 @@ async def list_units_paginated(
     供后台管理使用的分页、筛选、排序接口。
     """
     sort_by = sort.split(',') if sort else ["name"]
-    filters = filter_params.model_dump(exclude_unset=True)
-    if "name" in filters:
-        filters["name__ilike"] = filters.pop("name")
+    query_filters = filter_params.model_dump(exclude_unset=True)
+    search_term = query_filters.pop("name", None)
+    # 2. final_filters 首先包含其他可能的精确过滤器
+    final_filters = query_filters
+
+    # 3. 如果存在通用搜索词，则构建一个 __or__ 查询
+    if search_term:
+        final_filters["__or__"] = {
+            "name__ilike": search_term,
+            "abbreviation__ilike": search_term,
+            "plural_name__ilike": search_term,
+        }
 
     page_data = await service.page_list_units(
-        page=page, per_page=per_page, sort_by=sort_by, filters=filters
+        page=page, per_page=per_page, sort_by=sort_by, filters=final_filters
     )
     return response_success(data=page_data)
 

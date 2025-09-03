@@ -44,23 +44,31 @@ class RecipeService(BaseService):
             return []
 
         final_tag_ids = set()
-        existing_ids_to_validate = []
+        ids_from_strings_to_validate = []
 
         for item in tag_inputs:
             if isinstance(item, UUID):
                 # 先收集所有传入的UUID，稍后一次性验证
-                existing_ids_to_validate.append(item)
+                final_tag_ids.add(item)
+
             elif isinstance(item, str) and item.strip():
-                # 对于字符串，调用 repo 的 find_or_create 方法
-                # 这个方法是原子性的，能保证标签的唯一性
-                tag_orm = await self.tag_repo.find_or_create(item.strip())
-                final_tag_ids.add(tag_orm.id)
+                cleaned_value = item.strip()
+                # 尝试将字符串解析为 UUID
+                try:
+                    tag_id = UUID(cleaned_value)
+                    ids_from_strings_to_validate.append(tag_id)
+                except ValueError:
+                    # 如果解析失败 (说明它不是UUID格式)，那么它就是一个普通的标签名
+                    # 执行“查找或创建”逻辑
+                    tag_orm = await self.tag_repo.find_or_create(cleaned_value)
+                    final_tag_ids.add(tag_orm.id)
+
 
         # 一次性验证所有传入的UUID是否存在
-        if existing_ids_to_validate:
-            if not await self.tag_repo.are_ids_valid(existing_ids_to_validate):
+        if ids_from_strings_to_validate:
+            if not await self.tag_repo.are_ids_valid(ids_from_strings_to_validate):
                 raise NotFoundException("一个或多个指定的标签ID不存在")
-            final_tag_ids.update(existing_ids_to_validate)
+            final_tag_ids.update(ids_from_strings_to_validate)
 
         return list(final_tag_ids)
 
