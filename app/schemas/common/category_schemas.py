@@ -18,12 +18,20 @@ class CategoryUpdate(BaseModel):
     description: Optional[str] = None
     parent_id: Optional[UUID] = None
 
+class CategoryParentRead(BaseModel):
+    id: UUID
+    name: str
+    model_config = {"from_attributes": True}
+
 class CategoryRead(CategoryBase):
     id: UUID
+    parent: Optional[CategoryParentRead] = None # <-- 新增的字段
     model_config = {"from_attributes": True}
 
 class CategoryReadWithChildren(CategoryRead):
-    children: List["CategoryRead"] = []
+    # 将 children 的类型从 List["CategoryRead"] 改为 List["CategoryReadWithChildren"]
+    # 这样 Pydantic 就会用正确的、支持递归的模型去序列化子节点
+    children: List["CategoryReadWithChildren"] = []
 
 
 class CategoryFilterParams(BaseModel):

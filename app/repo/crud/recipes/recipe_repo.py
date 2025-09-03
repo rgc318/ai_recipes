@@ -40,7 +40,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
                 selectinload(Recipe.cover_image), # 预加载封面图
                 selectinload(Recipe.gallery_images), # 预加载画廊
                 selectinload(Recipe.tags),
-                selectinload(Recipe.categories),  # <-- 如果您有 categories 也要加上
+                selectinload(Recipe.categories).selectinload(Category.parent),
                 selectinload(Recipe.steps).selectinload(RecipeStep.images),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
                 selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),
@@ -86,7 +86,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
             selectinload(Recipe.cover_image),  # 【更新】
             selectinload(Recipe.tags),
             selectinload(Recipe.gallery_images),  # <-- 添加这一行
-            selectinload(Recipe.categories),     # <-- 如果您有 categories 也要加上
+            selectinload(Recipe.categories).selectinload(Category.parent),
             selectinload(Recipe.steps),
             selectinload(Recipe.ingredients).selectinload(RecipeIngredient.ingredient),
             selectinload(Recipe.ingredients).selectinload(RecipeIngredient.unit),

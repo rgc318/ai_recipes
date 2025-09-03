@@ -10,6 +10,7 @@ from math import ceil
 from sqlalchemy import asc, desc, or_, func, update
 import logging
 
+from app.core.logger import get_logger
 from app.core.types.common import ModelType
 from app.infra.db.repo_registrar import RepositoryRegistrar
 from app.schemas.common.page_schemas import PageResponse
@@ -39,6 +40,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         self.db = db
         self.model = model
         self.context = context or {}
+        self.logger = get_logger(self.__class__.__name__)
 
 
 

@@ -8,7 +8,8 @@ from app.core.exceptions import NotFoundException, AlreadyExistsException, Busin
     PermissionDeniedException
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.common.category_model import Category
-from app.schemas.common.category_schemas import CategoryCreate, CategoryUpdate, CategoryRead, CategoryReadWithChildren
+from app.schemas.common.category_schemas import CategoryCreate, CategoryUpdate, CategoryRead, CategoryReadWithChildren, \
+    CategoryParentRead
 from app.repo.crud.common.category_repo import CategoryRepository
 from app.repo.crud.common.base_repo import PageResponse
 from app.services._base_service import BaseService
@@ -52,12 +53,18 @@ class CategoryService(BaseService):
 
         # 递归地将 ORM 对象转换为 Pydantic DTO
         def to_dto(category: Category) -> CategoryReadWithChildren:
+            # 【核心修正】在转换时，一并处理 parent 关系
+            parent_dto = None
+            if category.parent:
+                parent_dto = CategoryParentRead.model_validate(category.parent)
+
             return CategoryReadWithChildren(
                 id=category.id,
                 name=category.name,
                 slug=category.slug,
                 description=category.description,
                 parent_id=category.parent_id,
+                parent=parent_dto, # <-- 将转换后的 parent_dto 赋值
                 children=[to_dto(child) for child in category.children]
             )
 
@@ -69,7 +76,7 @@ class CategoryService(BaseService):
         """获取分类的分页列表（后台管理使用）。"""
         # 权限检查
         if self.current_user:
-            category_policy.can_list(self.current_user)
+            category_policy.can_list(self.current_user, Category)
 
         paged_orm = await self.category_repo.get_paged_categories(
             page=page, per_page=per_page, sort_by=sort_by, filters=filters or {}
@@ -82,7 +89,7 @@ class CategoryService(BaseService):
         # 权限检查
         if not self.current_user:
             raise PermissionDeniedException("需要登录才能创建分类")
-        category_policy.can_create(self.current_user)
+        category_policy.can_create(self.current_user, Category)
 
         # 业务规则：slug 应该是唯一的
         if await self.category_repo.find_by_slug(category_in.slug):
@@ -98,9 +105,19 @@ class CategoryService(BaseService):
                 raise NotFoundException("指定的父分类不存在")
 
         try:
-            new_category = await self.category_repo.create(category_in)
+            new_category_orm = await self.category_repo.create(category_in)
             await self.category_repo.commit()
-            return new_category
+
+            # ▼▼▼▼▼ 【核心修正】在这里添加重新查询的逻辑 ▼▼▼▼▼
+            # 为了安全地返回带有预加载关系的DTO，我们在提交后重新获取一次刚刚创建的对象。
+            # 这次获取会使用我们之前创建的、能够预加载 parent 的方法。
+            created_category_with_relations = await self.category_repo.get_by_id_with_parent(new_category_orm.id)
+            if not created_category_with_relations:
+                # 这种情况很少发生，但作为健壮性检查是好的
+                raise NotFoundException("创建分类后未能立即找到，请重试。")
+
+            return created_category_with_relations
+            # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         except Exception as e:
             self.logger.error(f"创建分类失败: {e}")
             await self.category_repo.rollback()
@@ -134,9 +151,16 @@ class CategoryService(BaseService):
                     raise BusinessRuleException("不能将分类移动到其自己的子分类下")
 
         try:
-            updated_category = await self.category_repo.update(category_to_update, update_data)
+            await self.category_repo.update(category_to_update, update_data)
             await self.category_repo.commit()
-            return updated_category
+
+            # 【核心修正 - 备选方案】
+            # 提交后，重新查询一次这个对象，并明确预加载 parent 关系
+            refetched_category = await self.category_repo.get_by_id_with_parent(category_id)
+            if not refetched_category:
+                raise NotFoundException("更新后未能找到分类，可能出现并发问题。")
+
+            return refetched_category
         except Exception as e:
             self.logger.error(f"更新分类 {category_id} 失败: {e}")
             await self.category_repo.rollback()
