@@ -3,7 +3,7 @@
 from typing import List, Optional, Union
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from app.schemas.file.file_record_schemas import FileRecordRead
 from app.schemas.common.category_schemas import CategoryRead
@@ -111,26 +111,33 @@ class RecipeCreate(RecipeBase):
     category_ids: Optional[List[UUID]] = Field(None, description="关联的分类ID列表")
 
 
-class RecipeUpdate(RecipeBase):  # 【修改】让 RecipeUpdate 继承自 RecipeBase
-    """更新菜谱的请求体 (V3 - 结构化版)，所有字段均为可选。"""
-    # RecipeBase 中的所有字段 (title, description, difficulty等) 自动继承
-    # 并且我们需要将它们全部变为可选
-    title: Optional[str] = None
-    description: Optional[str] = None
-    prep_time: Optional[str] = None
-    cook_time: Optional[str] = None
-    servings: Optional[str] = None
-    difficulty: Optional[str] = None
-    equipment: Optional[str] = None
-    author_notes: Optional[str] = None
+def make_optional(model: type[BaseModel]) -> type[BaseModel]:
+    fields = model.model_fields
+    optional_fields = {
+        name: (Optional[field.annotation], None) for name, field in fields.items()
+    }
+    return create_model(f'{model.__name__}Optional', **optional_fields)
 
-    # 关联关系字段保持不变
-    tags: Optional[List[Union[UUID, str]]] = None
-    ingredients: Optional[List[RecipeIngredientInput]] = None
-    cover_image_id: Optional[UUID] = None
-    gallery_image_ids: Optional[List[UUID]] = None
-    steps: Optional[List[RecipeStepInput]] = None
-    category_ids: Optional[List[UUID]] = None
+# RecipeUpdate 现在包含了 RecipeBase 和 RecipeCreate 中所有字段的可选版本
+RecipeUpdate = make_optional(RecipeCreate)
+# class RecipeUpdate(RecipeBase):  # 【修改】让 RecipeUpdate 继承自 RecipeBase
+#     """更新菜谱的请求体 (V3 - 结构化版)，所有字段均为可选。"""
+#     # RecipeBase 中的所有字段 (title, description, difficulty等) 自动继承
+#     # 并且我们需要将它们全部变为可选
+#     title: Optional[str] = None
+#     description: Optional[str] = None
+#     prep_time: Optional[str] = None
+#     cook_time: Optional[str] = None
+#     servings: Optional[str] = None
+#
+#
+#     # 关联关系字段保持不变
+#     tags: Optional[List[Union[UUID, str]]] = None
+#     ingredients: Optional[List[RecipeIngredientInput]] = None
+#     cover_image_id: Optional[UUID] = None
+#     gallery_image_ids: Optional[List[UUID]] = None
+#     steps: Optional[List[RecipeStepInput]] = None
+#     category_ids: Optional[List[UUID]] = None
 
 
 # =================================================================
