@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
@@ -25,6 +27,7 @@ class UploadResult(BaseModel):
     """
     用于从 FileService 返回上传结果的统一数据传输对象 (DTO)。
     """
+    record_id: Optional[UUID] = Field(..., description="新创建的 FileRecord 在数据库中的ID")
     object_name: str = Field(..., description="文件在对象存储中的唯一路径/键")
     url: str = Field(..., description="文件的可公开访问 URL")
     etag: Optional[str] = Field(None, description="文件的 ETag，由对象存储生成")
@@ -92,3 +95,23 @@ class PresignedUploadPolicy(BaseModel):
         ...,
         description="文件上传成功后，最终可公开访问的URL。"
     )
+
+
+class RegisterFilePayload(BaseModel):
+    """
+    用于“登记文件”接口的请求体模型。
+    """
+    object_name: str = Field(..., description="文件在云存储中唯一的 object_name")
+    original_filename: str = Field(..., description="文件的原始名称")
+    content_type: str = Field(..., description="文件的 MIME 类型")
+    file_size: int = Field(..., description="文件大小（字节）")
+    profile_name: str = Field(..., description="上传时使用的业务场景 Profile 名称")
+    etag: Optional[str] = Field(None, description="文件上传后，由对象存储返回的 ETag")
+
+
+class PresignedPolicyPayload(BaseModel):
+    profile_name: str = Field(..., description="在配置中定义的 Profile 名称。")
+    original_filename: str = Field(..., description="待上传文件的原始名称。")
+    content_type: str = Field(..., description="待上传文件的MIME类型, e.g., 'image/jpeg'。")
+    path_params: Optional[dict] = Field(default_factory=dict, description="用于格式化路径的动态参数。")
+    expires_in: int = Field(3600, description="URL 有效期（秒）。")

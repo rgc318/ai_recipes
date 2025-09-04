@@ -35,6 +35,7 @@ class UserCreate(UserBase):
     username: UsernameStr = Field(..., description="用户名")
     password: PasswordStr = Field(..., description="密码，最少 8 位")
     role_ids: Optional[List[UUID]] = Field(None, description="创建用户时要关联的角色ID列表。")
+    avatar_file_record_id: Optional[UUID] = None
 
 # ==========================
 # 🔄 用户更新模型 (核心修改)
@@ -50,6 +51,7 @@ class UserUpdate(BaseModel): # 【修改】不再继承自 UserBase
     is_verified: Optional[bool] = Field(None, description="是否已验证")
     is_locked: Optional[bool] = Field(None, description="是否已锁定")
     role_ids: Optional[List[UUID]] = Field(None, description="分配给用户的角色ID列表")
+    avatar_file_record_id: Optional[UUID] = None
 
 # ==========================
 # 🙋 用户更新自己的个人资料模型 (核心修改)

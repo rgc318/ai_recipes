@@ -66,6 +66,67 @@ class MinioClient(StorageClientInterface, ABC):
         logger.info(f"[MinIO Driver] Removing object: {object_name}")
         return self.s3.delete_object(Bucket=self.bucket_name, Key=object_name)
 
+    def copy_object(
+            self,
+            destination_key: str,
+            source_key: str,
+            acl: Optional[str] = "public-read",
+            metadata: Optional[Dict[str, str]] = None,
+            preserve_metadata: bool = True,
+    ) -> None:
+        """
+        在桶内复制对象，支持 ACL 与元数据控制。
+
+        :param destination_key: 目标对象 Key
+        :param source_key: 源对象 Key
+        :param acl: 访问权限控制（默认 public-read）
+        :param metadata: 覆盖元数据（如 {"ContentType": "image/png"}）
+        :param preserve_metadata: 是否保留源对象的元数据（默认 True）
+        """
+        logger.info(
+            f"[MinIO Driver] Copying object "
+            f"from '{source_key}' to '{destination_key}' in bucket '{self.bucket_name}'"
+        )
+        try:
+            copy_source = {"Bucket": self.bucket_name, "Key": source_key}
+
+            # 元数据策略
+            metadata_directive = "COPY" if preserve_metadata else "REPLACE"
+
+            # 构建请求参数
+            params = {
+                "CopySource": copy_source,
+                "Bucket": self.bucket_name,
+                "Key": destination_key,
+                "MetadataDirective": metadata_directive,
+            }
+
+            # 如果提供了元数据，必须用 REPLACE 模式
+            if metadata:
+                params["Metadata"] = metadata
+                params["MetadataDirective"] = "REPLACE"
+
+            # ACL（注意 MinIO 部分环境可能不支持 ACL）
+            if acl:
+                params["ACL"] = acl
+
+            # 执行复制
+            response = self.s3.copy_object(**params)
+
+            logger.info(
+                f"[MinIO Driver] Successfully copied '{source_key}' "
+                f"to '{destination_key}' (ETag={response.get('CopyObjectResult', {}).get('ETag')})"
+            )
+            return response
+
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            logger.error(
+                f"Failed to copy object from '{source_key}' to '{destination_key}' "
+                f"(ErrorCode={error_code}): {e}"
+            )
+            raise FileException("Cloud storage copy operation failed.") from e
+
     def stat_object(self, object_name: str):
         """底层 stat_object 方法 (用于检查存在性)"""
         return self.s3.head_object(Bucket=self.bucket_name, Key=object_name)

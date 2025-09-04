@@ -18,7 +18,7 @@ class FileRecordRead(BaseModel):
 
     # 【新增】将 profile_name 暴露给 API
     profile_name: str = Field(..., description="上传时使用的 Storage Profile 名称")
-
+    is_associated: Optional[bool] = False
     # 【新增】将 etag 暴露给 API (可选)
     etag: Optional[str] = Field(None, description="文件在对象存储中的 ETag")
 
@@ -36,6 +36,12 @@ class FileRecordUpdate(BaseModel):
     用于更新文件元数据的模型 (例如，重命名)。
     """
     original_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    # ... 其他字段
+
+    # --- 你需要在这里添加下面这一行 ---
+    object_name: Optional[str] = None
+    is_associated: Optional[bool] = None
 
 # 【新增】用于创建文件记录的 Schema
 class FileRecordCreate(BaseModel):
@@ -46,6 +52,7 @@ class FileRecordCreate(BaseModel):
     uploader_id: UUID
     profile_name: str
     etag: Optional[str] = None
+    # is_associated: Optional[str] = False
 
 class FileFilterParams(BaseModel):
     """

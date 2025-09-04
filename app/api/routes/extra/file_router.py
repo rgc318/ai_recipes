@@ -3,12 +3,18 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
-from app.api.dependencies.service_getters.common_service_getter import get_file_service # 【修改】建议将依赖注入函数重命名
-from app.schemas.common.api_response import StandardResponse, response_success
-from app.schemas.file.file_schemas import ( # 导入我们为返回值定义的 Pydantic 模型
+from app.api.dependencies.permissions import require_verified_user
+from app.api.dependencies.service_getters.common_service_getter import get_file_service, \
+    get_file_record_service  # 【修改】建议将依赖注入函数重命名
+from app.core.exceptions import BaseBusinessException
+from app.schemas.common.api_response import StandardResponse, response_success, response_error
+from app.schemas.file.file_record_schemas import FileRecordRead
+from app.schemas.file.file_schemas import (  # 导入我们为返回值定义的 Pydantic 模型
     UploadResult,
-    PresignedUploadURL
+    PresignedUploadURL, RegisterFilePayload, PresignedUploadPolicy, PresignedPolicyPayload
 )
+from app.schemas.users.user_context import UserContext
+from app.services.file.file_record_service import FileRecordService
 from app.services.file.file_service import FileService
 from pydantic import BaseModel, Field
 
@@ -62,6 +68,7 @@ async def upload_by_profile(
     path_params_json: str = Form("{}", description="用于格式化路径的动态参数 (JSON 字符串), e.g., '{\"tenant_id\": \"abc\"}'"),
     file: UploadFile = File(...),
     file_service: FileService = Depends(get_file_service),
+    current_user: UserContext = Depends(require_verified_user),
 ):
     """
     通用的、由配置驱动的文件上传端点。
@@ -70,9 +77,10 @@ async def upload_by_profile(
     result = await file_service.upload_by_profile(
         file=file,
         profile_name=profile_name,
+        uploader_context=current_user,
         **path_params
     )
-    return response_success(data=result, message="文件上传成功。")
+    return response_success(data=result, message="文件上传并登记成功。")
 
 
 @router.delete(
@@ -154,6 +162,31 @@ async def get_presigned_upload_url_by_profile(
     return response_success(data=result)
 
 
+
+
+
+@router.post(
+    "/presigned-url/policy", # 建议使用 /policy 路径以作区分
+    response_model=StandardResponse[PresignedUploadPolicy],
+    summary="【安全模式】按 Profile 生成用于上传的预签名 POST 策略 (通用)",
+    dependencies=[Depends(require_verified_user)] # 这是一个安全操作，建议加上权限校验
+)
+async def generate_presigned_upload_policy_by_profile(
+    payload: PresignedPolicyPayload,
+    file_service: FileService = Depends(get_file_service),
+):
+    """
+    为客户端直接上传文件请求一个安全的、带策略的临时凭证。
+    这是推荐的通用上传授权方法。
+    """
+    result = await file_service.generate_presigned_upload_policy(
+        profile_name=payload.profile_name,
+        original_filename=payload.original_filename,
+        content_type=payload.content_type, # <--- 传递 content_type
+        expires_in=payload.expires_in,
+        **payload.path_params
+    )
+    return response_success(data=result)
 @router.get(
     "/files",
     response_model=StandardResponse[List[str]],
@@ -170,3 +203,34 @@ async def list_files_by_profile(
         prefix=prefix
     )
     return response_success(data=files_list)
+
+
+@router.post(
+    "/register",
+    response_model=StandardResponse[FileRecordRead],
+    summary="登记一个已通过预签名URL上传的文件"
+)
+async def register_file(
+    payload: RegisterFilePayload,
+    service: FileRecordService = Depends(get_file_record_service),
+    current_user: UserContext = Depends(require_verified_user),
+):
+    """
+    在文件成功上传到对象存储后，客户端调用此接口，
+    在数据库中创建对应的 FileRecord 记录，并返回该记录的完整信息（包括ID）。
+    """
+    try:
+        file_record_orm = await service.register_uploaded_file(
+            object_name=payload.object_name,
+            original_filename=payload.original_filename,
+            content_type=payload.content_type,
+            file_size=payload.file_size,
+            profile_name=payload.profile_name,
+            uploader_context=current_user,
+            etag=payload.etag
+        )
+        # 登记成功后，可能需要填充动态URL再返回
+        file_record_dto = await service.get_file_record_by_id(file_record_orm.id)
+        return response_success(data=file_record_dto)
+    except BaseBusinessException as e:
+        return response_error(message=e.message)
