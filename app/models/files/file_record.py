@@ -26,6 +26,7 @@ class FileRecord(BaseModel, table=True):
     original_filename: str = Field(..., description="文件的原始名称")
     file_size: int = Field(..., description="文件大小（字节）")
     content_type: str = Field(..., description="文件的 MIME 类型")
+    is_associated: Optional[bool] = Field(default=False, description="文件是否关联了业务数据")
 
     # 【新增】文件的 ETag，用于完整性校验
     etag: Optional[str] = Field(None, index=True, description="文件在对象存储中的 ETag")

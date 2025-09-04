@@ -1,6 +1,7 @@
+import os
 from datetime import datetime, timezone
 from uuid import UUID
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
 from fastapi import Depends, UploadFile
 from sqlalchemy.orm.exc import StaleDataError
@@ -8,11 +9,13 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException, \
     ConcurrencyConflictException, UnauthorizedException
+from app.models.files.file_record import FileRecord
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.users.user import User
-from app.schemas.file.file_record_schemas import FileRecordCreate
+from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate
 from app.schemas.file.file_schemas import AvatarLinkDTO
+from app.schemas.users import user_context
 from app.schemas.users.user_context import UserContext
 from app.schemas.users.user_schemas import UserCreate, UserUpdate, UserReadWithRoles, UserUpdateProfile
 from app.core.security.password_utils import get_password_hash, verify_password
@@ -20,8 +23,9 @@ from app.repo.crud.users.user_repo import UserRepository
 from app.repo.crud.users.role_repo import RoleRepository
 from app.repo.crud.common.base_repo import PageResponse
 from app.services._base_service import BaseService
-from app.services.file.file_record_service import FileRecordService
-from app.services.file.file_service import FileService
+if TYPE_CHECKING:
+    from app.services.file.file_record_service import FileRecordService
+    from app.services.file.file_service import FileService
 
 
 class UserService(BaseService):
@@ -33,8 +37,8 @@ class UserService(BaseService):
     def __init__(
             self,
             repo_factory: RepositoryFactory,
-            file_service: FileService = Depends(),
-            file_record_service: FileRecordService = Depends(),
+            file_service: "FileService" = Depends(),
+            file_record_service: "FileRecordService" = Depends(),
     ):
         super().__init__()
         self.factory = repo_factory
@@ -147,8 +151,9 @@ class UserService(BaseService):
         """创建新用户，并进行唯一性检查。"""
         # 1. 分离 role_ids 和其他用户数据
         role_ids = user_in.role_ids
+        avatar_file_id = user_in.avatar_file_record_id
         # 推荐使用 model_dump (Pydantic v2)
-        user_data_dict = user_in.model_dump(exclude={"password", "role_ids"})
+        user_data_dict = user_in.model_dump(exclude={"password", "role_ids", "avatar_file_record_id"})
         if await self.user_repo.get_by_username(user_in.username):
             raise AlreadyExistsException("用户名已存在")
 
@@ -162,6 +167,12 @@ class UserService(BaseService):
 
 
         user_data_dict["hashed_password"] = hashed_password
+
+        # 2. 初始化将在多个作用域中使用的变量
+        new_user: Optional[User] = None
+        file_record: Optional[FileRecord] = None
+        permanent_path: Optional[str] = None
+        temp_path: Optional[str] = None
 
         try:
             # 【核心修改】在这里调整对象创建流程
@@ -186,17 +197,54 @@ class UserService(BaseService):
             self.user_repo.db.add(new_user)
             await self.user_repo.flush()  # 将变更刷入数据库
 
-            # 5. 所有操作成功，提交整个事务
+            if avatar_file_id:
+                file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+                file_record = await file_record_repo.get_by_id(avatar_file_id)
+
+                if not file_record or getattr(file_record, 'is_associated', False):
+                    raise NotFoundException("指定的头像文件无效或已被使用。")
+
+                # 1. 准备路径信息，但不执行移动
+                temp_path = file_record.object_name
+                filename = os.path.basename(temp_path)
+                permanent_path = f"users/{new_user.id}/{filename}"
+
+                # 2. 更新数据库记录（仍在事务中）
+                new_user.avatar_url = permanent_path
+                await self.file_record_service.update_file_record(
+                    record_id=file_record.id,
+                    record_update=FileRecordUpdate(
+                        object_name=permanent_path,
+                        is_associated=True
+                    ),
+                    commit=False  # 【重要】确保它加入我们的大事务
+                )
+
             await self.user_repo.commit()
-
-            # 6. 刷新 new_user 对象以获取最新的数据库状态（如DB默认值、触发器生成的值等）
-            await self.user_repo.refresh(new_user)
-
-            return new_user
         except Exception as e:
             # 发生任何错误，回滚事务
             await self.user_repo.rollback()
             raise e
+
+        # --- 阶段二: 外部非事务性操作 ---
+        # 只有在数据库事务成功后才执行
+        if permanent_path and temp_path:
+            try:
+                # 只有在数据库成功提交后，才执行不可逆的文件移动
+                await self.file_service.move_file(
+                    source_key=temp_path,
+                    destination_key=permanent_path,
+                    profile_name="user_avatars"
+                )
+            except Exception as move_error:
+                # 记录严重错误，因为此时数据库已更新但文件移动失败
+                self.logger.critical(
+                    f"CRITICAL: User {new_user.id} DB created/updated, but failed to move avatar from {temp_path} to {permanent_path}. Error: {move_error}")
+                # 这里可以触发一个后台任务来重试移动，或者发出警报
+
+        await self.user_repo.refresh(new_user)
+        return new_user
+
 
     async def update_user(self, user_id: UUID, updates: UserUpdate) -> User:
         """
@@ -623,7 +671,18 @@ class UserService(BaseService):
         # return self._set_full_avatar_url(user)
         return user
 
-    async def link_new_avatar(self, user_id: UUID, avatar_dto: AvatarLinkDTO) -> User:
+    async def _cleanup_old_avatar_records(self, old_avatar_object_name: str):
+        """
+        【职责更明确】一个私有方法，只负责清理与旧头像相关的【数据库记录】。
+        它不包含 commit，以便被调用者纳入其自身的事务。
+        """
+        if not old_avatar_object_name:
+            return
+
+        file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+        await file_record_repo.soft_delete_by_object_name(old_avatar_object_name)
+
+    async def link_new_avatar(self, user_id: UUID, avatar_dto: AvatarLinkDTO, user_context: UserContext) -> User:
         """
         原子化地关联一个已通过预签名URL上传的头像。
         这个方法不处理文件上传，只处理数据库事务。
@@ -646,29 +705,37 @@ class UserService(BaseService):
         try:
             # 2. 【安全校验】确认文件确实已上传到对象存储
             # 这是重要的一步，防止客户端伪造请求
-            if not await self.file_service.file_exists(new_avatar_name, profile_name="user_avatars"):
-                raise NotFoundException("指定的上传文件不存在或尚未完成上传。")
+            # if not await self.file_service.file_exists(new_avatar_name, profile_name="user_avatars"):
+            #     raise NotFoundException("指定的上传文件不存在或尚未完成上传。")
 
+
+            new_file_record = await self.file_record_service.register_uploaded_file(
+                object_name=avatar_dto.object_name,
+                original_filename=avatar_dto.original_filename,
+                content_type=avatar_dto.content_type,
+                file_size=avatar_dto.file_size,
+                profile_name="user_avatars",  # 明确业务场景
+                uploader_context=user_context,
+                etag=avatar_dto.etag,
+                commit=False
+            )
             # 3. 如果存在旧头像，执行清理（和之前完全一样）
-            if old_avatar_name:
-                await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
-                file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
-                await file_record_repo.soft_delete_by_object_name(old_avatar_name)
+            await self._cleanup_old_avatar_records(old_avatar_name)
 
             # 4. 创建新的 FileRecord（数据源从UploadFile变为DTO）
-            file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
-            await file_record_repo.create(FileRecordCreate(
-                object_name=new_avatar_name,
-                original_filename=avatar_dto.original_filename,
-                file_size=avatar_dto.file_size,
-                content_type=avatar_dto.content_type,
-                uploader_id=user_id,
-                profile_name="user_avatars",
-                etag=avatar_dto.etag
-            ))
+            # file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
+            # await file_record_repo.create(FileRecordCreate(
+            #     object_name=new_avatar_name,
+            #     original_filename=avatar_dto.original_filename,
+            #     file_size=avatar_dto.file_size,
+            #     content_type=avatar_dto.content_type,
+            #     uploader_id=user_id,
+            #     profile_name="user_avatars",
+            #     etag=avatar_dto.etag
+            # ))
 
             # 5. 更新 User 对象（和之前完全一样）
-            user.avatar_url = new_avatar_name
+            user.avatar_url = new_file_record.object_name
             self.user_repo.db.add(user)
 
             # 6. 提交事务（和之前完全一样）
@@ -682,7 +749,20 @@ class UserService(BaseService):
             # 如果重试也失败，可以后续通过一个清理任务来处理。
             raise e
 
+        # --- 阶段二: 外部非事务性操作 ---
+        # 只有在上面的数据库事务完全成功后，才会执行到这里。
+        if old_avatar_name:
+            try:
+                # 现在才去删除云存储上的物理文件
+                await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
+            except Exception as e:
+                # 如果这里失败了，最坏的情况是留下了一个孤儿文件，这是可以接受的。
+                # 记录日志，以便后续通过定时任务清理。
+                self.logger.error(f"数据库更新成功，但删除旧的物理头像文件 {old_avatar_name} 失败: {e}")
+
         # 刷新并返回结果（和之前完全一样）
         await self.user_repo.refresh(user)
         # return self._set_full_avatar_url(user)
         return user
+
+

@@ -2,11 +2,11 @@ import asyncio
 import os
 from asyncio import Semaphore
 from datetime import datetime
-from typing import BinaryIO, List
+from typing import BinaryIO, List, TYPE_CHECKING
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
-from fastapi import UploadFile
+from fastapi import UploadFile, Depends
 from starlette.concurrency import run_in_threadpool
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -15,9 +15,14 @@ from app.core.logger import logger
 from app.infra.storage.storage_factory import StorageFactory
 from app.infra.storage.storage_interface import StorageClientInterface
 from app.schemas.file.file_schemas import UploadResult, PresignedUploadURL, PresignedUploadPolicy
+from app.schemas.users.user_context import UserContext
+from app.services._base_service import BaseService
+if TYPE_CHECKING:
+    from app.services.file.file_record_service import FileRecordService
 
 
-class FileService:
+
+class FileService(BaseService):
     """
     一个通用的文件存储服务层。
 
@@ -25,8 +30,15 @@ class FileService:
     来动态地处理不同业务场景（Profiles）下的文件操作。
     """
 
-    def __init__(self, factory: StorageFactory, concurrency_limit: int = 5):
+    def __init__(
+            self,
+            factory: StorageFactory,
+            file_record_service: "FileRecordService" = Depends(),
+            concurrency_limit: int = 5
+    ):
+        super().__init__()
         self.factory = factory
+        self.file_record_service = file_record_service  # <-- 保存实例
         self.upload_semaphore = Semaphore(concurrency_limit)
 
 
@@ -162,25 +174,53 @@ class FileService:
 
         return client, object_name
 
-    async def upload_user_avatar(self, file: UploadFile, user_id: str) -> UploadResult:
+    async def upload_user_avatar(
+        self,
+        file: UploadFile,
+        uploader_context: UserContext, # <-- 【修正】接收 uploader_context
+        user_id: str
+    ) -> UploadResult:
         """上传用户头像。"""
+        # 【修正】将 uploader_context 传递下去
         return await self.upload_by_profile(
             file=file,
             profile_name="user_avatars",
-            user_id=user_id  # 将 user_id 作为关键字参数传递
+            uploader_context=uploader_context,
+            user_id=user_id
         )
 
-    async def upload_secure_report(self, file: UploadFile) -> UploadResult:
+    async def upload_secure_report(
+            self,
+            file: UploadFile,
+            uploader_context: UserContext
+    ) -> UploadResult:
         """上传安全报告。"""
-        return await self.upload_by_profile(file=file, profile_name="secure_reports")
+        return await self.upload_by_profile(
+            file=file,
+            profile_name="secure_reports",
+            uploader_context=uploader_context  # <-- 传递
+        )
 
-    async def batch_upload_by_profile(self, files: List[UploadFile], profile_name: str) -> List[dict]:
+    async def batch_upload_by_profile(
+        self,
+        files: List[UploadFile],
+        profile_name: str,
+        uploader_context: UserContext # <-- 增加
+    ) -> List[dict]:
         """按指定的 Profile 批量上传多个文件。"""
-        tasks = [self.upload_by_profile(file, profile_name) for file in files]
+        tasks = [
+            self.upload_by_profile(file, profile_name, uploader_context) for file in files
+        ]
         results = await asyncio.gather(*tasks)
         return results
 
-    async def upload_by_profile(self, file: UploadFile, profile_name: str, **path_params) -> UploadResult:
+    async def upload_by_profile(
+            self,
+            file: UploadFile,
+            profile_name: str,
+            uploader_context: UserContext,  # <-- 1. 增加 uploader_context 参数
+            **path_params
+    ) -> UploadResult:
         """
         根据指定的业务场景 Profile 上传文件。
         这是所有上传操作的入口点。
@@ -211,11 +251,23 @@ class FileService:
                 content_type=file.content_type
             )
 
+
+        new_file_record = await self.file_record_service.register_uploaded_file(
+            object_name=object_name,
+            original_filename=file.filename,
+            content_type=file.content_type,
+            file_size=file_size,
+            profile_name=profile_name,
+            uploader_context=uploader_context,
+            etag=str(etag),
+            commit=True
+        )
         # 5. 构建最终 URL 并返回
         return UploadResult(
+            record_id=new_file_record.id,  # <-- 补上 record_id
             object_name=object_name,
             url=client.build_final_url(object_name),
-            etag=etag,
+            etag=str(etag),
             file_size=file_size,
             content_type=file.content_type
         )
@@ -423,3 +475,41 @@ class FileService:
             logger.error(f"Failed to generate POST Policy for {object_name}: {e}")
             raise FileException(message="Could not generate upload policy.")
 
+    async def move_file(
+            self,
+            source_key: str,
+            destination_key: str,
+            profile_name: str
+    ) -> None:
+        """
+        在同一个 Profile (存储桶) 内移动（重命名）一个文件。
+        这在将临时文件转为正式文件时非常有用。
+        """
+        # 1. 获取对应的存储客户端
+        client = self.factory.get_client_by_profile(profile_name)
+        logger.info(f"Attempting to move '{source_key}' to '{destination_key}' in profile '{profile_name}'")
+
+        try:
+            # 2. 【核心步骤】调用底层客户端的 "copy_object" 方法
+            #    这通常是一个高效的服务器端复制操作。
+            #    我们假设您的 StorageClientInterface 有一个 copy_object 方法。
+            await run_in_threadpool(
+                client.copy_object,
+                destination_key=destination_key,
+                source_key=source_key
+            )
+            logger.info(f"Successfully copied '{source_key}' to '{destination_key}'.")
+
+            # 3. 复制成功后，删除源文件
+            await self.delete_file(source_key, profile_name)
+            logger.info(f"Successfully moved file by deleting source '{source_key}'.")
+
+        except ClientError as e:
+            # 如果复制或删除失败，记录错误并抛出异常
+            logger.error(f"Failed to move file from '{source_key}' to '{destination_key}': {e}")
+            # 在这里可以考虑进行一次清理，尝试删除可能已创建的目标文件，以避免不一致
+            # 但更简单的做法是让调用方处理这个异常
+            raise FileException(message="File move operation failed in storage.")
+        except Exception as e:
+            logger.exception(f"Unexpected error during file move: {e}")
+            raise FileException(message="An unexpected error occurred during file move.")

@@ -22,6 +22,13 @@ class StorageClientInterface(ABC):
         pass
 
     @abstractmethod
+    def copy_object(self, destination_key: str, source_key: str) -> None:
+        """
+        在存储桶内部复制一个对象，从源路径到目标路径。
+        """
+        pass
+
+    @abstractmethod
     def get_presigned_url(self, client_method: str, object_name: str, expires_in: int) -> str:
         """
         生成预签名 URL (用于 GET 或 PUT)。

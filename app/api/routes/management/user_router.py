@@ -145,7 +145,8 @@ async def link_uploaded_avatar(
     """第三步：客户端在文件成功上传到对象存储后，调用此接口完成最终的关联。"""
     updated_user = await user_service.link_new_avatar(
         user_id=current_user.id,
-        avatar_dto=payload
+        avatar_dto=payload,
+        user_context=current_user
     )
     return response_success(data=UserRead.model_validate(updated_user), message="头像更新成功")
 @router.patch("/me", response_model=StandardResponse[UserRead], summary="更新当前用户信息")
@@ -190,6 +191,56 @@ async def change_current_user_password(
 # ==========================
 # 👮‍ 管理员接口 (Admin)
 # ==========================
+
+# 【新增】管理员为指定用户生成头像上传策略
+@router.post(
+    "/{user_id}/avatar/generate-upload-policy",
+    response_model=StandardResponse[PresignedUploadPolicy],
+    summary="【管理员】为指定用户生成头像上传策略",
+    dependencies=[Depends(require_superuser)] # 确保只有超级管理员可以操作
+)
+async def admin_generate_avatar_upload_policy(
+    user_id: UUID, # 从路径中获取目标用户ID
+    payload: PresignedPolicyRequest,
+    file_service: FileService = Depends(get_file_service)
+):
+    """
+    第一步（管理员模式）：为指定用户上传新头像做准备，获取一个带安全策略的上传凭证。
+    """
+    policy_data = await file_service.generate_presigned_upload_policy(
+        profile_name="user_avatars",
+        original_filename=payload.original_filename,
+        content_type=payload.content_type,
+        # 可以将 user_id 作为路径参数，让存储结构更清晰
+        user_id=str(user_id)
+    )
+    return response_success(data=policy_data)
+
+
+# 【新增】管理员关联已上传的头像
+@router.patch(
+    "/{user_id}/avatar/link-uploaded-file",
+    response_model=StandardResponse[UserRead],
+    summary="【管理员】关联已上传的头像到指定用户",
+    dependencies=[Depends(require_superuser)]
+)
+async def admin_link_user_avatar(
+    user_id: UUID,
+    payload: AvatarLinkDTO,
+    current_user: UserContext = Depends(get_current_user), # 获取操作者（管理员）的上下文
+    user_service: UserService = Depends(get_user_service),
+):
+    """
+    第二步（管理员模式）：将已上传的文件与指定的用户ID进行关联。
+    """
+    # 直接复用 UserService 中强大且可复用的 link_new_avatar 方法
+    updated_user = await user_service.link_new_avatar(
+        user_id=user_id,
+        avatar_dto=payload,
+        user_context=current_user # 将管理员作为操作者传入
+    )
+    return response_success(data=UserRead.model_validate(updated_user), message="用户头像更新成功")
+
 @router.get(
     "/",
     response_model=StandardResponse[PageResponse[UserReadWithRoles]],

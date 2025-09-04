@@ -1,22 +1,28 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from uuid import UUID
 
+from fastapi import Depends
+
+from app.core.exceptions import NotFoundException
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.models.files.file_record import FileRecord
 from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate, FileRecordRead
 from app.schemas.common.page_schemas import PageResponse
-from app.services.file.file_service import FileService  # 需要 FileService 来生成 URL
+from app.schemas.users.user_context import UserContext
+from app.services._base_service import BaseService
+if TYPE_CHECKING:
+    from app.services.file.file_service import FileService
 
 
-class FileRecordService:
+class FileRecordService(BaseService):
     """
     文件记录业务服务层。
     封装了所有与文件元数据 (FileRecord) 相关的业务逻辑和数据库操作。
     这是文件管理模块 API 的主要服务提供者。
     """
 
-    def __init__(self, repo_factory: RepositoryFactory, file_service: FileService):
+    def __init__(self, repo_factory: RepositoryFactory, file_service: "FileService" = Depends()):
         """
         初始化 FileRecordService。
 
@@ -24,12 +30,13 @@ class FileRecordService:
             repo_factory (RepositoryFactory): 用于获取 Repository 实例的工厂。
             file_service (FileService): 用于处理与对象存储相关的操作，如此处用于生成 URL。
         """
+        super().__init__()
         self.repo_factory = repo_factory
         self.file_service = file_service
 
     async def _get_repo(self) -> FileRecordRepository:
         """辅助方法：获取 FileRecordRepository 的实例。"""
-        return self.repo_factory.get_repo(FileRecordRepository)
+        return self.repo_factory.get_repo_by_type(FileRecordRepository)
 
     async def _populate_url(self, record: FileRecord) -> FileRecordRead:
         """辅助方法：为 FileRecordRead DTO 填充动态生成的 URL。"""
@@ -70,7 +77,10 @@ class FileRecordService:
         return None
 
     async def update_file_record(
-            self, record_id: UUID, record_update: FileRecordUpdate
+            self,
+            record_id: UUID,
+            record_update: FileRecordUpdate,
+            commit: bool = True  # <-- 【核心修改】新增 commit 参数，并默认为 True
     ) -> Optional[FileRecordRead]:
         """
         更新文件记录的元数据（例如，重命名）。
@@ -80,8 +90,23 @@ class FileRecordService:
         if not db_record:
             return None
 
-        updated_record = await file_repo.update(db_record, record_update)
-        return await self._populate_url(updated_record)
+        update_data = record_update.model_dump(exclude_unset=True)
+        # update 方法只在内存中修改对象
+        updated_record_orm = await file_repo.update(db_record, update_data)
+
+        # 【核心修改】只有当 commit 为 True 时，才提交事务
+        # 这使得此方法既可以独立工作，也可以作为更大事务的一部分
+        if commit:
+            try:
+                await file_repo.commit()
+                await file_repo.refresh(updated_record_orm)
+            except Exception as e:
+                await file_repo.rollback()
+                self.logger.error(f"Failed to commit update for file record {record_id}: {e}")
+                raise
+
+        # 转换为 DTO 再返回
+        return await self._populate_url(updated_record_orm)
 
     async def delete_file_record(self, record_id: UUID) -> bool:
         """
@@ -130,3 +155,53 @@ class FileRecordService:
             per_page=paged_records.per_page,
             total_pages=paged_records.total_pages
         )
+
+    async def register_uploaded_file(
+            self,
+            object_name: str,
+            original_filename: str,
+            content_type: str,
+            file_size: int,
+            profile_name: str,
+            uploader_context: UserContext,
+            etag: Optional[str] = None,
+            commit: bool = True  # <-- 【核心修改】新增一个 commit 参数，并默认为 True
+    ) -> FileRecord:
+        """
+        在数据库中登记一个已上传到对象存储的文件。
+        这是一个原子性的数据库操作。
+        """
+        # 1. 安全校验：确认文件确实存在于对象存储中
+        if not await self.file_service.file_exists(object_name, profile_name):
+            raise NotFoundException("要登记的文件在存储中不存在。")
+
+        file_record_repo = await self._get_repo()
+
+        # ... 后续使用 file_record_repo 即可 ...
+        existing_record = await file_record_repo.get_by_object_name(object_name)
+        if existing_record:
+            self.logger.warning(f"文件 {object_name} 已被登记，将直接返回现有记录。")
+            return existing_record
+
+        # 3. 创建 FileRecordCreate 数据模型
+        record_in = FileRecordCreate(
+            object_name=object_name,
+            original_filename=original_filename,
+            file_size=file_size,
+            content_type=content_type,
+            profile_name=profile_name,
+            uploader_id=uploader_context.id,
+            etag=etag
+        )
+
+        # 4. 在事务中创建记录
+        try:
+            new_record = await file_record_repo.create(record_in)
+            # 【核心修改】只有当 commit 为 True 时，才提交事务
+            if commit:
+                await file_record_repo.commit()
+            return new_record
+        except Exception as e:
+            await file_record_repo.rollback()
+            self.logger.error(f"登记文件 {object_name} 失败: {e}")
+            raise
