@@ -104,6 +104,16 @@ storage_profiles:
       - "application/vnd.ms-excel" # .xls
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" # .xlsx
 
+  recipe_images:
+    client: "public_cloud_storage"
+    default_folder: "recipes/{recipe_id}"
+    max_file_size_mb: 5 # 比如，限制头像最大为5MB
+    # 【修改】现在这是一个真正的 MIME 类型列表
+    allowed_file_types:
+      - "image/jpeg"
+      - "image/png"
+      - "image/webp"
+
   # 【新增】一个通用的文件上传 Profile，包含各种主流文件类型
   general_files:
     client: "public_cloud_storage" # 假设通用文件默认存放在私有存储中

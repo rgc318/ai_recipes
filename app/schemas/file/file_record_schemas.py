@@ -1,7 +1,9 @@
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from app.utils.url_builder import build_public_storage_url
 
 
 class FileRecordRead(BaseModel):
@@ -23,7 +25,17 @@ class FileRecordRead(BaseModel):
     etag: Optional[str] = Field(None, description="文件在对象存储中的 ETag")
 
     # 我们可以额外添加一个由 Service 层动态生成的 url 字段
-    url: Optional[str] = Field(None, description="文件的可访问 URL")
+    @computed_field
+    @property
+    def url(self) -> Optional[str]:
+        """
+        动态生成此文件记录的完整可访问URL。
+        """
+        # 假设所有通过这个 Schema 返回的都是公开文件
+        # 如果需要区分公开/私有，可以在这里加入更多逻辑
+        if self.object_name:
+            return build_public_storage_url(self.object_name)
+        return None
 
     # 允许从 ORM 对象模型进行转换
     model_config = {

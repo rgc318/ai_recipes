@@ -6,12 +6,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status, Query
 
-from app.api.dependencies.service_getters.common_service_getter import get_recipes_service
+from app.api.dependencies.service_getters.common_service_getter import get_recipes_service, get_file_service, \
+    get_file_record_service
 from app.core.exceptions import BaseBusinessException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.core.security.security import get_current_user
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
 from app.schemas.common.page_schemas import PageResponse
+from app.schemas.common.payloads import BatchAddImagesPayload
+from app.schemas.file.file_schemas import PresignedUploadPolicy, PresignedPolicyRequest, RecipeImageLinkDTO
 from app.schemas.recipes.recipe_schemas import (
     RecipeRead,
     RecipeCreate,
@@ -20,6 +23,8 @@ from app.schemas.recipes.recipe_schemas import (
 )
 from app.schemas.users.user_context import UserContext
 from app.schemas.users.user_schemas import BatchDeletePayload
+from app.services.file.file_record_service import FileRecordService
+from app.services.file.file_service import FileService
 from app.services.recipes.recipe_service import RecipeService
 
 # 初始化 Router
@@ -27,6 +32,128 @@ router = APIRouter(
     # dependencies=[Depends(require_verified_user)], # 所有菜谱接口都需要用户先登录
 )
 
+
+@router.post(
+    "/{recipe_id}/gallery-images",
+    response_model=StandardResponse[NoneType],
+    summary="[菜谱图库] 批量新增图片",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_user)]
+)
+async def add_images_to_recipe_gallery(
+    recipe_id: UUID,
+    payload: BatchAddImagesPayload, # 接收一个包含 file_record_id 列表的请求体
+    service: RecipeService = Depends(get_recipes_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """为一个已存在的菜谱，批量关联一批已上传并登记的图片到其图库中。"""
+    await service.add_images_to_gallery(recipe_id, payload.file_record_ids, current_user)
+    return response_success(data=None, message="图库图片添加成功")
+
+@router.delete(
+    "/{recipe_id}/gallery-images/{image_record_id}",
+    response_model=StandardResponse[NoneType],
+    summary="[菜谱图库] 删除一张指定图片",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_current_user)]
+)
+async def remove_image_from_recipe_gallery(
+    recipe_id: UUID,
+    image_record_id: UUID,
+    service: RecipeService = Depends(get_recipes_service),
+    file_service: FileService = Depends(get_file_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """从菜谱图库中移除一张图片，并将其物理文件一并删除。"""
+    # Service 层的方法现在是批量接收，我们传入单个ID的列表
+    await service.remove_images_from_gallery(recipe_id, [image_record_id], current_user, file_service)
+    return response_success(data=None, message="图库图片删除成功")
+
+@router.post(
+    "/{recipe_id}/steps/{step_id}/images",
+    response_model=StandardResponse[NoneType],
+    summary="[菜谱步骤] 新增一张或多张图片",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_user)]
+)
+async def add_images_to_recipe_step(
+    recipe_id: UUID,
+    step_id: UUID,
+    payload: BatchAddImagesPayload,
+    service: RecipeService = Depends(get_recipes_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """为一个指定的菜谱步骤，批量关联一批已上传的图片。"""
+    # 注意：此处我们调用的是为步骤设计的 service 方法
+    # 您需要在 RecipeService 中实现 add_images_to_step
+    await service.add_images_to_step(recipe_id, step_id, payload.file_record_ids, current_user)
+    return response_success(data=None, message="步骤图片添加成功")
+
+
+@router.delete(
+    "/{recipe_id}/steps/{step_id}/images/{image_record_id}",
+    response_model=StandardResponse[NoneType],
+    summary="[菜谱步骤] 删除一张指定图片",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_current_user)]
+)
+async def remove_image_from_recipe_step(
+    recipe_id: UUID,
+    step_id: UUID,
+    image_record_id: UUID,
+    service: RecipeService = Depends(get_recipes_service),
+file_service: FileService = Depends(get_file_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """从指定的菜谱步骤中移除一张图片。"""
+    # 同样，您需要在 RecipeService 中实现 remove_image_from_step
+    await service.remove_image_from_step(recipe_id, step_id, [image_record_id], current_user, file_service)
+    return response_success(data=None, message="步骤图片删除成功")
+@router.post(
+    "/{recipe_id}/images/generate-upload-policy",
+    response_model=StandardResponse[PresignedUploadPolicy],
+    summary="[菜谱] 为上传新图片生成预签名策略"
+)
+async def recipe_generate_upload_policy(
+    recipe_id: UUID,
+    payload: PresignedPolicyRequest,
+    service: RecipeService = Depends(get_recipes_service),
+    file_service: FileService = Depends(get_file_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """
+    为【已存在】的菜谱上传新图片（主图、图库、步骤图等）做准备。
+    """
+    # 权限检查：确保当前用户有权编辑此菜谱
+    await service.get_recipe_details(recipe_id, current_user)
+
+    # 直接调用通用 FileService，但传入了从路径中获得的 recipe_id
+    policy_data = await file_service.generate_presigned_upload_policy(
+        profile_name="recipe_images",
+        original_filename=payload.original_filename,
+        content_type=payload.content_type,
+        # 【关键】传入 recipe_id，让后端构建永久存储路径
+        recipe_id=str(recipe_id)
+    )
+    return response_success(data=policy_data)
+
+@router.put(
+    "/{recipe_id}/cover-image",
+    response_model=StandardResponse[RecipeRead],
+    summary="[菜谱] 更新/替换封面图",
+    dependencies=[Depends(get_current_user)]
+)
+async def update_recipe_cover_image(
+    recipe_id: UUID,
+    payload: RecipeImageLinkDTO,
+    service: RecipeService = Depends(get_recipes_service),
+    file_service: FileService = Depends(get_file_service),
+    file_record_service: FileRecordService = Depends(get_file_record_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """一站式替换菜谱的封面图。"""
+    updated_recipe = await service.link_new_cover_image(recipe_id, payload, current_user, file_service, file_record_service)
+    return response_success(data=RecipeRead.model_validate(updated_recipe))
 
 @router.post(
     "/",
@@ -37,13 +164,15 @@ router = APIRouter(
 async def create_recipe(
     recipe_in: RecipeCreate,
     service: RecipeService = Depends(get_recipes_service),
+    file_service: FileService = Depends(get_file_service),
+    file_record_service: FileRecordService = Depends(get_file_record_service),
     current_user: UserContext = Depends(get_current_user),
 ):
     """
     创建一个新的菜谱，包括其基本信息、关联的标签和配料列表。
     """
     try:
-        new_recipe_orm = await service.create_recipe(recipe_in, current_user)
+        new_recipe_orm = await service.create_recipe(recipe_in, current_user, file_service, file_record_service)
         # 使用 RecipeRead DTO 来序列化返回的数据
         return response_success(
             data=RecipeRead.model_validate(new_recipe_orm), message="菜谱创建成功"

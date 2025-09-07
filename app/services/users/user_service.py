@@ -44,7 +44,6 @@ class UserService(BaseService):
         self.factory = repo_factory
         self.file_service = file_service
         self.file_record_service = file_record_service
-        # 假设你的工厂通过类型获取 repo
         self.user_repo: UserRepository = repo_factory.get_repo_by_type(UserRepository)
         self.role_repo: RoleRepository = repo_factory.get_repo_by_type(RoleRepository)
 
@@ -207,7 +206,7 @@ class UserService(BaseService):
                 # 1. 准备路径信息，但不执行移动
                 temp_path = file_record.object_name
                 filename = os.path.basename(temp_path)
-                permanent_path = f"users/{new_user.id}/{filename}"
+                permanent_path = f"avatars/{new_user.id}/{filename}"
 
                 # 2. 更新数据库记录（仍在事务中）
                 new_user.avatar_url = permanent_path

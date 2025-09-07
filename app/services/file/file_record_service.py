@@ -33,25 +33,27 @@ class FileRecordService(BaseService):
         super().__init__()
         self.repo_factory = repo_factory
         self.file_service = file_service
+        # 【优化】直接在初始化时获取 repo
+        self.file_repo: FileRecordRepository = repo_factory.get_repo_by_type(FileRecordRepository)
 
-    async def _get_repo(self) -> FileRecordRepository:
-        """辅助方法：获取 FileRecordRepository 的实例。"""
-        return self.repo_factory.get_repo_by_type(FileRecordRepository)
+    # async def _get_repo(self) -> FileRecordRepository:
+    #     """辅助方法：获取 FileRecordRepository 的实例。"""
+    #     return self.repo_factory.get_repo_by_type(FileRecordRepository)
 
-    async def _populate_url(self, record: FileRecord) -> FileRecordRead:
-        """辅助方法：为 FileRecordRead DTO 填充动态生成的 URL。"""
-        dto = FileRecordRead.from_orm(record)
-        # 根据记录的 profile_name 和 object_name 生成可访问的 URL
-        # 注意：对于私有文件，这里可以生成预签名 URL
-        if record.profile_name in ["secure_reports", "private_files"]:  # 示例私有 profiles
-            dto.url = await self.file_service.generate_presigned_get_url(
-                object_name=record.object_name,
-                profile_name=record.profile_name
-            )
-        else:  # 默认生成公开 URL
-            client = self.file_service.factory.get_client_by_profile(record.profile_name)
-            dto.url = client.build_final_url(record.object_name)
-        return dto
+    # async def _populate_url(self, record: FileRecord) -> FileRecordRead:
+    #     """辅助方法：为 FileRecordRead DTO 填充动态生成的 URL。"""
+    #     dto = FileRecordRead.from_orm(record)
+    #     # 根据记录的 profile_name 和 object_name 生成可访问的 URL
+    #     # 注意：对于私有文件，这里可以生成预签名 URL
+    #     if record.profile_name in ["secure_reports", "private_files"]:  # 示例私有 profiles
+    #         dto.url = await self.file_service.generate_presigned_get_url(
+    #             object_name=record.object_name,
+    #             profile_name=record.profile_name
+    #         )
+    #     else:  # 默认生成公开 URL
+    #         client = self.file_service.factory.get_client_by_profile(record.profile_name)
+    #         dto.url = client.build_final_url(record.object_name)
+    #     return dto
 
     # --- CRUD 操作 ---
 
@@ -62,18 +64,17 @@ class FileRecordService(BaseService):
         - 检查用户存储配额
         - 触发病毒扫描任务等
         """
-        file_repo = await self._get_repo()
         # 在这里添加任何创建前的通用业务逻辑
-        return await file_repo.create(record_in)
+        return await self.file_repo.create(record_in)
 
     async def get_file_record_by_id(self, record_id: UUID) -> Optional[FileRecordRead]:
         """
         根据 ID 获取单个文件记录的详细信息（包含 URL）。
         """
-        file_repo = await self._get_repo()
-        record = await file_repo.get_by_id(record_id)
+        record = await self.file_repo.get_by_id(record_id)
         if record:
-            return await self._populate_url(record)
+            # 【核心修改】直接使用 model_validate 进行转换，Pydantic 会自动处理 url
+            return FileRecordRead.model_validate(record)
         return None
 
     async def update_file_record(
@@ -85,28 +86,28 @@ class FileRecordService(BaseService):
         """
         更新文件记录的元数据（例如，重命名）。
         """
-        file_repo = await self._get_repo()
-        db_record = await file_repo.get_by_id(record_id)
+
+        db_record = await self.file_repo.get_by_id(record_id)
         if not db_record:
             return None
 
         update_data = record_update.model_dump(exclude_unset=True)
         # update 方法只在内存中修改对象
-        updated_record_orm = await file_repo.update(db_record, update_data)
+        updated_record_orm = await self.file_repo.update(db_record, update_data)
 
         # 【核心修改】只有当 commit 为 True 时，才提交事务
         # 这使得此方法既可以独立工作，也可以作为更大事务的一部分
         if commit:
             try:
-                await file_repo.commit()
-                await file_repo.refresh(updated_record_orm)
+                await self.file_repo.commit()
+                await self.file_repo.refresh(updated_record_orm)
             except Exception as e:
-                await file_repo.rollback()
+                await self.file_repo.rollback()
                 self.logger.error(f"Failed to commit update for file record {record_id}: {e}")
                 raise
 
         # 转换为 DTO 再返回
-        return await self._populate_url(updated_record_orm)
+        return FileRecordRead.model_validate(updated_record_orm)
 
     async def delete_file_record(self, record_id: UUID) -> bool:
         """
@@ -114,10 +115,9 @@ class FileRecordService(BaseService):
         注意：此操作只删除数据库记录，不删除对象存储中的物理文件。
               物理文件的删除应由 FileService 处理，并由更高层服务协调。
         """
-        file_repo = await self._get_repo()
-        db_record = await file_repo.get_by_id(record_id)
+        db_record = await self.file_repo.get_by_id(record_id)
         if db_record:
-            await file_repo.soft_delete(db_record)
+            await self.file_repo.soft_delete(db_record)
             return True
         return False
 
@@ -134,10 +134,9 @@ class FileRecordService(BaseService):
         获取文件记录的分页列表，并为每条记录生成可访问的 URL。
         这是文件管理模块后端的核心方法。
         """
-        file_repo = await self._get_repo()
 
         # 从 Repository 获取分页的 ORM 对象
-        paged_records = await file_repo.get_paged_list(
+        paged_records = await self.file_repo.get_paged_list(
             page=page,
             per_page=per_page,
             filters=filters,
@@ -145,7 +144,7 @@ class FileRecordService(BaseService):
         )
 
         # 将 ORM 对象列表转换为包含 URL 的 DTO 列表
-        dto_items = [await self._populate_url(record) for record in paged_records.items]
+        dto_items = [FileRecordRead.model_validate(record) for record in paged_records.items]
 
         # 使用转换后的 DTO 列表构建并返回最终的 PageResponse
         return PageResponse(
@@ -175,10 +174,9 @@ class FileRecordService(BaseService):
         if not await self.file_service.file_exists(object_name, profile_name):
             raise NotFoundException("要登记的文件在存储中不存在。")
 
-        file_record_repo = await self._get_repo()
 
         # ... 后续使用 file_record_repo 即可 ...
-        existing_record = await file_record_repo.get_by_object_name(object_name)
+        existing_record = await self.file_repo.get_by_object_name(object_name)
         if existing_record:
             self.logger.warning(f"文件 {object_name} 已被登记，将直接返回现有记录。")
             return existing_record
@@ -196,12 +194,12 @@ class FileRecordService(BaseService):
 
         # 4. 在事务中创建记录
         try:
-            new_record = await file_record_repo.create(record_in)
+            new_record = await self.file_repo.create(record_in)
             # 【核心修改】只有当 commit 为 True 时，才提交事务
             if commit:
-                await file_record_repo.commit()
+                await self.file_repo.commit()
             return new_record
         except Exception as e:
-            await file_record_repo.rollback()
+            await self.file_repo.rollback()
             self.logger.error(f"登记文件 {object_name} 失败: {e}")
             raise

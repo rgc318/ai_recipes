@@ -235,6 +235,15 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id_including_deleted(self, record_id: Any) -> Optional[ModelType]:
+        """
+        获取单个记录，【忽略】is_deleted 标志。
+        这在需要访问已软删除记录的元数据（如用于清理物理文件）时非常有用。
+        """
+        # 构建一个不带 is_deleted 过滤的查询
+        stmt = select(self.model).where(self.model.id == record_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def get_by_ids(self, ids: List[UUID]) -> List[ModelType]:
         """
