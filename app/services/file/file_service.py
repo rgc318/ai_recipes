@@ -2,7 +2,7 @@ import asyncio
 import os
 from asyncio import Semaphore
 from datetime import datetime
-from typing import BinaryIO, List, TYPE_CHECKING
+from typing import BinaryIO, List, TYPE_CHECKING, Optional
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
@@ -218,7 +218,7 @@ class FileService(BaseService):
             self,
             file: UploadFile,
             profile_name: str,
-            uploader_context: UserContext,  # <-- 1. 增加 uploader_context 参数
+            uploader_context: Optional[UserContext] = None,  # <-- 1. 增加 uploader_context 参数
             **path_params
     ) -> UploadResult:
         """

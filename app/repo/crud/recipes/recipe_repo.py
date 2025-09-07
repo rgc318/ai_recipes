@@ -3,10 +3,11 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import delete, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import delete, select, insert, update
+from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import NotFoundException
 from app.models.common.category_model import RecipeCategoryLink, Category
 from app.models.files.file_record import FileRecord
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
@@ -37,7 +38,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
             self._base_stmt()
             .where(self.model.id == recipe_id)
             .options(
-                selectinload(Recipe.cover_image), # 预加载封面图
+                joinedload(Recipe.cover_image),
                 selectinload(Recipe.gallery_images), # 预加载画廊
                 selectinload(Recipe.tags),
                 selectinload(Recipe.categories).selectinload(Category.parent),
@@ -83,7 +84,7 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
 
         # 3. 定义需要“预加载”的关联数据
         eager_loading_options = [
-            selectinload(Recipe.cover_image),  # 【更新】
+            joinedload(Recipe.cover_image),
             selectinload(Recipe.tags),
             selectinload(Recipe.gallery_images),  # <-- 添加这一行
             selectinload(Recipe.categories).selectinload(Category.parent),
@@ -164,6 +165,10 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         await self.db.flush()
     async def set_recipe_tags(self, recipe: Recipe, tag_ids: List[UUID]) -> None:
         """【ORM模式】重新设置菜谱的所有标签。"""
+
+        if 'tags' not in recipe.__dict__:
+            recipe.tags = []
+
         if tag_ids:
             # Service层已校验过ID，这里直接查询
             tags_result = await self.db.execute(select(Tag).where(Tag.id.in_(tag_ids)))
@@ -197,3 +202,111 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
             recipe.categories = []
         self.db.add(recipe)
         await self.db.flush()
+
+    # ==========================
+    # ▼▼▼ 核心新增：精细化的图片画廊管理方法 ▼▼▼
+    # ==========================
+    async def add_gallery_images(self, recipe: Recipe, file_record_ids: List[UUID]) -> None:
+        """
+        【新增】为菜谱的画廊【增量添加】一批新的图片关联。
+        此方法不影响已有的画廊图片。
+        """
+        if not file_record_ids:
+            return
+        # 构建需要插入到 recipe_gallery_link 中间表的数据
+        links_to_add = [
+            {"recipe_id": recipe.id, "file_id": image_id}
+            for image_id in file_record_ids
+        ]
+        # 使用 SQLAlchemy Core 的 insert 语句，执行高效的批量插入
+        stmt = insert(RecipeGalleryLink).values(links_to_add)
+        await self.db.execute(stmt)
+        await self.db.flush()
+    async def remove_gallery_images(self, recipe: Recipe, image_record_ids: List[UUID]) -> None:
+        """
+        【新增】从菜谱的画廊中【批量删除】指定的图片关联。
+        """
+        if not image_record_ids:
+            return
+        # 直接删除中间表中的关联记录
+        stmt = (
+            delete(RecipeGalleryLink)
+            .where(
+                RecipeGalleryLink.recipe_id == recipe.id,
+                RecipeGalleryLink.file_id.in_(image_record_ids)
+            )
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+    async def replace_gallery_image_link(
+            self,
+            recipe: Recipe,
+            old_image_record_id: UUID,
+            new_image_record_id: UUID
+    ) -> None:
+        """
+        【新增】在菜谱画廊中，将一个旧的图片关联替换为一个新的图片关联。
+        """
+        # 使用 update 语句，精确地更新中间表中的一条记录
+        stmt = (
+            update(RecipeGalleryLink)
+            .where(
+                RecipeGalleryLink.recipe_id == recipe.id,
+                RecipeGalleryLink.file_id == old_image_record_id
+            )
+            .values(file_id=new_image_record_id)
+        )
+        result = await self.db.execute(stmt)
+        await self.db.flush()
+        # 作为一个健壮性检查，可以确认是否真的有一行被更新了
+        if result.rowcount == 0:
+            raise NotFoundException("The image to be replaced is not associated with this recipe.")
+
+    async def add_step_images(self, step_id: UUID, file_record_ids: List[UUID]) -> None:
+        """为菜谱步骤【增量添加】一批新的图片关联。"""
+        if not file_record_ids:
+            return
+        links_to_add = [
+            {"step_id": step_id, "file_id": image_id}
+            for image_id in file_record_ids
+        ]
+        stmt = insert(RecipeStepImageLink).values(links_to_add)
+        await self.db.execute(stmt)
+        await self.db.flush()
+
+    async def remove_step_images(self, step_id: UUID, image_record_ids: List[UUID]) -> None:
+        """从菜谱步骤中【批量删除】指定的图片关联。"""
+        if not image_record_ids:
+            return
+        stmt = (
+            delete(RecipeStepImageLink)
+            .where(
+                RecipeStepImageLink.step_id == step_id,
+                RecipeStepImageLink.file_id.in_(image_record_ids)
+            )
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+
+    async def replace_step_image_link(
+            self,
+            step_id: UUID,
+            old_image_record_id: UUID,
+            new_image_record_id: UUID
+    ) -> None:
+        """在菜谱步骤中，将一个旧的图片关联替换为一个新的图片关联。"""
+        stmt = (
+            update(RecipeStepImageLink)
+            .where(
+                RecipeStepImageLink.step_id == step_id,
+                RecipeStepImageLink.file_id == old_image_record_id
+            )
+            .values(file_id=new_image_record_id)
+        )
+        result = await self.db.execute(stmt)
+        await self.db.flush()
+
+        if result.rowcount == 0:
+            raise NotFoundException("The step image to be replaced is not associated with this step.")
+
+    # ▲▲▲ 新增结束 ▲▲▲
