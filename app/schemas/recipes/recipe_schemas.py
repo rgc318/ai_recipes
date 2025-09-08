@@ -3,7 +3,7 @@
 from typing import List, Optional, Union
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, create_model, conlist
 
 from app.schemas.file.file_record_schemas import FileRecordRead
 from app.schemas.common.category_schemas import CategoryRead
@@ -14,9 +14,9 @@ from app.schemas.common.category_schemas import CategoryRead
 
 class RecipeStepInput(BaseModel):
     """用于创建/更新菜谱时，输入的单个步骤的数据结构。"""
-    instruction: str
+    instruction: str = Field(..., max_length=2000) # <-- 【新增】文本长度限制
     duration: Optional[str] = Field(None, description="此步骤预计花费的时间, e.g., '10分钟'")
-    image_ids: Optional[List[UUID]] = Field(None, description="关联到此步骤的图片(FileRecord)ID列表")
+    image_ids: Optional[conlist(UUID, max_length=5)] = Field(None, description="每个步骤最多5张图")
 
 class RecipeStepRead(BaseModel):
     """用于API响应的单个步骤的数据结构。"""
@@ -68,9 +68,9 @@ class IngredientRead(IngredientBase):
 class RecipeIngredientInput(BaseModel):
     ingredient: Union[UUID, str] = Field(..., description="已存在的食材ID或新的食材名称")
     unit_id: Optional[UUID] = None
-    group: Optional[str] = Field(None, description="配料分组名, e.g., '面团部分'")
-    quantity: Optional[float] = None
-    note: Optional[str] = None
+    group: Optional[str] = Field(None, max_length=20, description="配料分组名, e.g., '面团部分'")  # <-- 【新增】文本长度限制
+    quantity: Optional[float] = Field(None, ge=0, le=99999)  # <-- 【新增】数值范围限制
+    note: Optional[str] = Field(None, max_length=100)  # <-- 【新增】文本长度限制
 
 
 class RecipeIngredientRead(BaseModel):
@@ -86,14 +86,14 @@ class RecipeIngredientRead(BaseModel):
 # === Recipe ===
 
 class RecipeBase(BaseModel):
-    title: str
-    description: Optional[str] = None
-    prep_time: Optional[str] = None
-    cook_time: Optional[str] = None
-    servings: Optional[str] = None
+    title: str = Field(..., max_length=100)  # <-- 【新增】文本长度限制
+    description: Optional[str] = Field(None, max_length=1000)  # <-- 【新增】文本长度限制
+    prep_time: Optional[str] = Field(None, max_length=50)  # <-- 【新增】文本长度限制
+    cook_time: Optional[str] = Field(None, max_length=50)  # <-- 【新增】文本长度限制
+    servings: Optional[str] = Field(None, max_length=50)  # <-- 【新增】文本长度限制
     difficulty: Optional[str] = Field(None, description="难度等级")
-    equipment: Optional[str] = Field(None, description="所需厨具清单, 用换行符分隔")
-    author_notes: Optional[str] = Field(None, description="作者小贴士")
+    equipment: Optional[str] = Field(None, max_length=1000, description="所需厨具清单, 用换行符分隔")
+    author_notes: Optional[str] = Field(None, max_length=1000, description="作者小贴士")
 
 # =================================================================
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修改点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
@@ -101,14 +101,13 @@ class RecipeBase(BaseModel):
 
 class RecipeCreate(RecipeBase):
     """创建新菜谱的请求体 (V3 - 结构化版)。"""
-    tags: Optional[List[Union[UUID, str]]] = None
-    ingredients: Optional[List[RecipeIngredientInput]] = None
+    tags: Optional[conlist(Union[UUID, str], max_length=8)] = None
+    ingredients: Optional[conlist(RecipeIngredientInput, max_length=50)] = None
+    steps: Optional[conlist(RecipeStepInput, max_length=20)] = None
+    category_ids: Optional[conlist(UUID, max_length=5)] = None
+    gallery_image_ids: Optional[conlist(UUID, max_length=9)] = None
 
-    # 【新增】接收结构化数据
     cover_image_id: Optional[UUID] = Field(None, description="封面图片的FileRecord ID")
-    gallery_image_ids: Optional[List[UUID]] = Field(None, description="画廊图片的FileRecord ID列表")
-    steps: Optional[List[RecipeStepInput]] = Field(None, description="结构化的烹饪步骤列表")
-    category_ids: Optional[List[UUID]] = Field(None, description="关联的分类ID列表")
 
 
 def make_optional(model: type[BaseModel]) -> type[BaseModel]:
@@ -125,29 +124,29 @@ class RecipeUpdate(BaseModel):
     采用“购物车”/“差量更新”模式。
     """
     # 1. 菜谱的基础信息字段 (全部设为可选)
-    title: Optional[str] = None
-    description: Optional[str] = None
-    prep_time: Optional[str] = None
-    cook_time: Optional[str] = None
-    servings: Optional[str] = None
+    title: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=1000)
+    prep_time: Optional[str] = Field(None, max_length=50)
+    cook_time: Optional[str] = Field(None, max_length=50)
+    servings: Optional[str] = Field(None, max_length=50)
     difficulty: Optional[str] = None
-    equipment: Optional[str] = None
-    author_notes: Optional[str] = None
+    equipment: Optional[str] = Field(None, max_length=1000)
+    author_notes: Optional[str] = Field(None, max_length=1000)
 
     # 2. 菜谱的关联关系字段（“全量替换”模式）
     #    如果前端传入这些字段，则后端会用新列表完全覆盖旧列表
-    tags: Optional[List[Union[UUID, str]]] = None
-    ingredients: Optional[List[RecipeIngredientInput]] = None
-    steps: Optional[List[RecipeStepInput]] = None
-    category_ids: Optional[List[UUID]] = None
-    # 注意：封面图的更新通常是独立的原子操作，但也可以放在这里
+    tags: Optional[conlist(Union[UUID, str], max_length=8)] = None
+    ingredients: Optional[conlist(RecipeIngredientInput, max_length=50)] = None
+    steps: Optional[conlist(RecipeStepInput, max_length=20)] = None
+    category_ids: Optional[conlist(UUID, max_length=5)] = None
+    gallery_image_ids: Optional[conlist(UUID, max_length=9)] = None
+
     cover_image_id: Optional[UUID] = None
 
     # 3. 【核心新增】用于图片集合的“差量更新”字段
     #    这些字段专门用于“购物车”模式
     images_to_add: Optional[List[UUID]] = Field(None, description="需要新增到画廊的图片ID列表")
     images_to_delete: Optional[List[UUID]] = Field(None, description="需要从画廊删除的图片ID列表")
-    gallery_image_ids: Optional[List[UUID]] = Field(None, description="画廊图片的最终完整顺序ID列表")
 
     # 注意：步骤图片(step images)通常是跟随步骤(steps)整体更新的，
     # 所以它们的变更信息已经包含在 steps 字段中了，一般无需在此处再添加差量字段。
