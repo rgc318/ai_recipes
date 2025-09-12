@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import delete, select, insert, update
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.exceptions import NotFoundException
 from app.models.common.category_model import RecipeCategoryLink, Category
 from app.models.files.file_record import FileRecord
@@ -310,3 +310,31 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
             raise NotFoundException("The step image to be replaced is not associated with this step.")
 
     # ▲▲▲ 新增结束 ▲▲▲
+
+    async def add_tags_to_recipes(self, recipe_ids: List[UUID], tag_ids: List[UUID]) -> None:
+        """
+        为一个或多个菜谱，批量添加一个或多个标签关联。
+        此方法是幂等的，能自动处理已存在的关联，不会重复插入。
+        """
+        if not recipe_ids or not tag_ids:
+            return
+
+        # 准备要批量插入的数据
+        links_to_add = [
+            {"recipe_id": recipe_id, "tag_id": tag_id}
+            for recipe_id in recipe_ids
+            for tag_id in tag_ids
+        ]
+
+        if not links_to_add:
+            return
+
+        # 使用 PostgreSQL 的 "ON CONFLICT DO NOTHING" 语法
+        # 这是一种非常高效的处理“如果不存在就插入”的模式
+        stmt = pg_insert(RecipeTagLink).values(links_to_add)
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=['recipe_id', 'tag_id']  # 指定唯一性约束的列
+        )
+
+        await self.db.execute(stmt)
+        # 注意：这个方法是一个原子操作，Service层会负责 commit

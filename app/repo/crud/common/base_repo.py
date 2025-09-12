@@ -12,6 +12,7 @@ import logging
 
 from app.core.logger import get_logger
 from app.core.types.common import ModelType
+from app.enums.query_enums import ViewMode
 from app.infra.db.repo_registrar import RepositoryRegistrar
 from app.schemas.common.page_schemas import PageResponse
 
@@ -167,7 +168,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
     # 数据删除方法 (Delete)
     # ==========================
 
-    async def delete(self, db_obj: ModelType) -> None:
+    async def hard_delete(self, db_obj: ModelType) -> None:
         """
         从数据库中物理删除一个对象。
         """
@@ -220,18 +221,20 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
     # 数据查询方法 (Query) - 这部分基本无需改动
     # ==========================
 
-    def _base_stmt(self):
-        """
-        构建基础查询语句，默认过滤掉软删除的记录 (如果模型支持)。
-        """
+    def _base_stmt(self, view_mode: str = ViewMode.ACTIVE):
+        """【修改】构建基础查询，根据 view_mode 动态应用软删除过滤。"""
         stmt = select(self.model)
         if hasattr(self.model, 'is_deleted'):
-            # 使用 getattr 安全地获取列对象
-            stmt = stmt.where(getattr(self.model, 'is_deleted') == False)
+            if view_mode == ViewMode.ACTIVE:
+                stmt = stmt.where(getattr(self.model, 'is_deleted') == False)
+            elif view_mode == ViewMode.DELETED:
+                stmt = stmt.where(getattr(self.model, 'is_deleted') == True)
+            # 如果 view_mode 是 'all', 则不添加任何 is_deleted 的过滤条件
         return stmt
 
-    async def get_by_id(self, id: Any) -> Optional[ModelType]:
-        stmt = self._base_stmt().where(self.model.id == id)
+    async def get_by_id(self, id: Any, view_mode: str = ViewMode.ACTIVE) -> Optional[ModelType]:
+        """【修改】现在 get_by_id 也支持 view_mode。"""
+        stmt = self._base_stmt(view_mode=view_mode).where(self.model.id == id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -245,7 +248,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_ids(self, ids: List[UUID]) -> List[ModelType]:
+    async def get_by_ids(self, ids: List[UUID], view_mode: str = ViewMode.ACTIVE) -> List[ModelType]:
         """
         根据一个ID列表，批量获取对象。
         这是一个非常高效的查询，可以避免在循环中进行多次数据库调用。
@@ -259,7 +262,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         if not ids:
             return []
 
-        stmt = self._base_stmt().where(self.model.id.in_(ids))
+        stmt = self._base_stmt(view_mode=view_mode).where(self.model.id.in_(ids))
         return await self._run_and_scalars(stmt, "get_by_ids")
 
     def apply_ordering(self, stmt, order_by: List[str]):
@@ -451,6 +454,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             per_page: int = 10,
             filters: Optional[Dict[str, Any]] = None,
             sort_by: Optional[List[str]] = None,
+            view_mode: str = ViewMode.ACTIVE,  # <-- 【新增】接收 view_mode
             eager_loads: Optional[List[Any]] = None,
             stmt_in: Optional[Any] = None  # 1. 【关键修复】在这里添加 stmt_in 参数
     ) -> PageResponse[ModelType]:
@@ -459,7 +463,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         这将是所有 Repo 的分页查询入口。
         """
         # 2. 【关键修复】如果传入了预处理过的 statement，就使用它；否则，创建默认的
-        stmt = stmt_in if stmt_in is not None else self._base_stmt()
+        stmt = stmt_in if stmt_in is not None else self._base_stmt(view_mode=view_mode)
 
         # 3. 应用动态过滤
         stmt = self._apply_dynamic_filters(stmt, filters or {})
@@ -573,3 +577,69 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
 
         return existing_count == len(unique_ids)
     # =================================================================
+
+
+    def _create_page_response(
+            self,
+            *,
+            items: List[ModelType],
+            total: int,
+            page: int,
+            per_page: int
+    ) -> PageResponse[ModelType]:
+        """
+        一个通用的辅助方法，用于构建标准的分页响应对象。
+        """
+        return PageResponse(
+            items=items,
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=ceil(total / per_page) if per_page > 0 else 0,
+        )
+
+    async def hard_delete_by_ids(self, ids: List[UUID]) -> int:
+        """【新增】根据ID列表，高效地批量物理删除对象。"""
+        if not ids:
+            return 0
+        stmt = self.model.__table__.delete().where(self.model.id.in_(ids))
+        result = await self.db.execute(stmt)
+        return result.rowcount
+
+    async def hard_delete(self, db_obj: ModelType) -> None:
+        """【新增】从数据库中物理删除一个对象。"""
+        await self.delete(db_obj)  # 复用旧的 delete 逻辑
+
+    async def restore(self, db_obj: ModelType) -> ModelType:
+        """【新增】恢复一个被软删除的对象。"""
+        if hasattr(db_obj, "is_deleted"):
+            setattr(db_obj, "is_deleted", False)
+            # 你可以决定是否要清空 deleted_at 和 deleted_by
+            if hasattr(db_obj, "deleted_at"):
+                setattr(db_obj, "deleted_at", None)
+            if hasattr(db_obj, "deleted_by"):
+                setattr(db_obj, "deleted_by", None)
+
+            self.db.add(db_obj)
+            await self.db.flush()
+            await self.db.refresh(db_obj)
+        return db_obj
+
+    async def restore_by_ids(self, ids: List[UUID]) -> int:
+        """【新增】根据ID列表，高效地批量恢复软删除的对象。"""
+        if not ids:
+            return 0
+
+        update_values = {"is_deleted": False}
+        if hasattr(self.model, "deleted_at"):
+            update_values["deleted_at"] = None
+        if hasattr(self.model, "deleted_by"):
+            update_values["deleted_by"] = None
+
+        stmt = (
+            update(self.model)
+            .where(self.model.id.in_(ids), self.model.is_deleted == True)  # 只恢复已删除的
+            .values(**update_values)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount
