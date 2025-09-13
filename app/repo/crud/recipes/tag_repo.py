@@ -88,93 +88,134 @@ class TagRepository(BaseRepository[Tag, TagCreate, TagUpdate]):
         existing_count = result.scalar_one()
         return existing_count == len(unique_ids)
 
+    # async def get_paged_tags(
+    #         self, *,
+    #         page: int,
+    #         per_page: int,
+    #         filters: Dict[str, Any],
+    #         sort_by: List[str],
+    #         view_mode: str = ViewMode.ACTIVE.value  # <-- 【新增】接收 view_mode 参数
+    # ) -> PageResponse[TagRead]:
+    #     """
+    #     获取标签的分页列表，并附带每个标签关联的菜谱数量。
+    #     """
+    #     recipe_count_col = func.count(RecipeTagLink.recipe_id).label("recipe_count")
+    #
+    #     # 1. 定义我们需要 GROUP BY 的所有列
+    #     #    这包括 Tag 模型的所有核心字段
+    #     group_by_columns = [getattr(self.model, col.name) for col in self.model.__table__.columns]
+    #
+    #     # 2. 构建基础查询，这次我们直接从主模型开始
+    #     stmt = (
+    #         select(self.model, recipe_count_col)
+    #         .outerjoin(RecipeTagLink, self.model.id == RecipeTagLink.tag_id)
+    #         .group_by(*group_by_columns)  # 【核心修复】按所有非聚合列进行分组
+    #     )
+    #
+    #     if view_mode == ViewMode.ACTIVE:
+    #         stmt = stmt.where(self.model.is_deleted == False)
+    #     elif view_mode == ViewMode.DELETED:
+    #         stmt = stmt.where(self.model.is_deleted == True)
+    #
+    #     filter_value = filters.get("name__ilike")
+    #     if filter_value:  # 👈 增加一个判断，确保值不是 None 或空字符串
+    #         stmt = stmt.where(self.model.name.ilike(f'%{filter_value}%'))
+    #
+    #
+    #     # 4. 计算总数
+    #     count_stmt = select(func.count()).select_from(stmt.subquery())
+    #     total_records = await self._run_and_scalar(count_stmt, "count_paged_tags")
+    #
+    #     if total_records == 0:
+    #         return self._create_page_response(items=[], total=0, page=page, per_page=per_page)
+    #
+    #     # 5. 应用排序
+    #     order_clauses = []
+    #     for sort_field in sort_by:
+    #         field_name = sort_field.lstrip('-')
+    #         direction = "desc" if sort_field.startswith('-') else "asc"
+    #
+    #         # 【关键】排序时，需要正确引用列
+    #         order_by_col = None
+    #         if field_name == 'recipe_count':
+    #             order_by_col = recipe_count_col
+    #         else:
+    #             # 对于模型字段，需要从 GROUP BY 的列中获取，以确保一致
+    #             for col in group_by_columns:
+    #                 if col.name == field_name:
+    #                     order_by_col = col
+    #                     break
+    #
+    #         if order_by_col is not None:
+    #             order_clauses.append(getattr(order_by_col, direction)())
+    #
+    #     if order_clauses:
+    #         stmt = stmt.order_by(*order_clauses)
+    #
+    #     # 6. 应用分页
+    #     offset = (page - 1) * per_page
+    #     stmt = stmt.limit(per_page).offset(offset)
+    #
+    #     # 7. 执行查询并处理结果
+    #     result = await self.db.execute(stmt)
+    #     orm_items_with_count = result.all()  # result.all() 返回 (Tag, recipe_count) 元组
+    #
+    #     dto_items = []
+    #     for item_orm, count in orm_items_with_count:
+    #         # 使用 model_validate 从 ORM 对象创建 DTO
+    #         item_dto = TagRead.model_validate(item_orm)
+    #         # 然后安全地给 DTO 的 recipe_count 字段赋值
+    #         item_dto.recipe_count = count
+    #         dto_items.append(item_dto)
+    #
+    #     return self._create_page_response(
+    #         items=dto_items,
+    #         total=total_records,
+    #         page=page,
+    #         per_page=per_page
+    #     )
+
     async def get_paged_tags(
             self, *,
             page: int,
             per_page: int,
             filters: Dict[str, Any],
             sort_by: List[str],
-            view_mode: str = ViewMode.ACTIVE.value  # <-- 【新增】接收 view_mode 参数
+            view_mode: str = ViewMode.ACTIVE.value
     ) -> PageResponse[TagRead]:
         """
-        获取标签的分页列表，并附带每个标签关联的菜谱数量。
+        【重构后】获取标签的分页列表，并附带每个标签关联的菜谱数量。
         """
         recipe_count_col = func.count(RecipeTagLink.recipe_id).label("recipe_count")
 
-        # 1. 定义我们需要 GROUP BY 的所有列
-        #    这包括 Tag 模型的所有核心字段
-        group_by_columns = [getattr(self.model, col.name) for col in self.model.__table__.columns]
-
-        # 2. 构建基础查询，这次我们直接从主模型开始
+        # 1. 只需构建核心查询语句
         stmt = (
             select(self.model, recipe_count_col)
             .outerjoin(RecipeTagLink, self.model.id == RecipeTagLink.tag_id)
-            .group_by(*group_by_columns)  # 【核心修复】按所有非聚合列进行分组
+            .group_by(self.model.id)  # 按主键分组即可
         )
 
-        if view_mode == ViewMode.ACTIVE:
-            stmt = stmt.where(self.model.is_deleted == False)
-        elif view_mode == ViewMode.DELETED:
-            stmt = stmt.where(self.model.is_deleted == True)
+        # 2. 将所有分页、过滤、排序的复杂工作交给强大的基类！
+        paged_response = await self.get_paged_list(
+            page=page,
+            per_page=per_page,
+            filters=filters,
+            sort_by=sort_by,
+            view_mode=view_mode,
+            stmt_in=stmt,
+            sort_map={'recipe_count': recipe_count_col}
+        )
 
-        filter_value = filters.get("name__ilike")
-        if filter_value:  # 👈 增加一个判断，确保值不是 None 或空字符串
-            stmt = stmt.where(self.model.name.ilike(f'%{filter_value}%'))
-
-
-        # 4. 计算总数
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        total_records = await self._run_and_scalar(count_stmt, "count_paged_tags")
-
-        if total_records == 0:
-            return self._create_page_response(items=[], total=0, page=page, per_page=per_page)
-
-        # 5. 应用排序
-        order_clauses = []
-        for sort_field in sort_by:
-            field_name = sort_field.lstrip('-')
-            direction = "desc" if sort_field.startswith('-') else "asc"
-
-            # 【关键】排序时，需要正确引用列
-            order_by_col = None
-            if field_name == 'recipe_count':
-                order_by_col = recipe_count_col
-            else:
-                # 对于模型字段，需要从 GROUP BY 的列中获取，以确保一致
-                for col in group_by_columns:
-                    if col.name == field_name:
-                        order_by_col = col
-                        break
-
-            if order_by_col is not None:
-                order_clauses.append(getattr(order_by_col, direction)())
-
-        if order_clauses:
-            stmt = stmt.order_by(*order_clauses)
-
-        # 6. 应用分页
-        offset = (page - 1) * per_page
-        stmt = stmt.limit(per_page).offset(offset)
-
-        # 7. 执行查询并处理结果
-        result = await self.db.execute(stmt)
-        orm_items_with_count = result.all()  # result.all() 返回 (Tag, recipe_count) 元组
-
+        # 3. 处理基类返回的元组列表
         dto_items = []
-        for item_orm, count in orm_items_with_count:
-            # 使用 model_validate 从 ORM 对象创建 DTO
+        for item_orm, count in paged_response.items:
             item_dto = TagRead.model_validate(item_orm)
-            # 然后安全地给 DTO 的 recipe_count 字段赋值
-            item_dto.recipe_count = count
+            item_dto.recipe_count = count if count is not None else 0
             dto_items.append(item_dto)
 
-        return self._create_page_response(
-            items=dto_items,
-            total=total_records,
-            page=page,
-            per_page=per_page
-        )
-
+        # 4. 替换 PageResponse 中的 items 并返回
+        paged_response.items = dto_items
+        return paged_response
     # =================================================================
     # ▼▼▼ 为“合并标签”功能提前准备的辅助方法 ▼▼▼
     # =================================================================

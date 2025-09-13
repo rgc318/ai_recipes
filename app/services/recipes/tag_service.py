@@ -49,12 +49,13 @@ class TagService(BaseService):
             raise AlreadyExistsException("已存在同名标签")
 
         try:
-            new_tag = await self.tag_repo.create(tag_in)
-            await self.tag_repo.commit()
+            async with self.tag_repo.db.begin_nested():
+                new_tag = await self.tag_repo.create(tag_in)
+
             return new_tag
         except Exception as e:
             self.logger.error(f"创建标签失败: {e}")
-            await self.tag_repo.rollback()
+            # await self.tag_repo.rollback()
             raise e
 
     async def update_tag(self, tag_id: UUID, tag_in: TagUpdate) -> Tag:
@@ -72,39 +73,32 @@ class TagService(BaseService):
                 raise AlreadyExistsException("更新失败，已存在同名标签")
 
         try:
-            updated_tag = await self.tag_repo.update(tag_to_update, update_data)
-            await self.tag_repo.commit()
+            async with self.tag_repo.db.begin_nested():
+                updated_tag = await self.tag_repo.update(tag_to_update, update_data)
             return updated_tag
         except Exception as e:
             self.logger.error(f"更新标签 {tag_id} 失败: {e}")
-            await self.tag_repo.rollback()
+            # await self.tag_repo.rollback()
             raise e
 
     async def delete_tag(self, tag_id: UUID) -> None:
         """【事务性】删除标签，并进行使用情况检查。"""
-        tag_to_delete = await self.get_tag_by_id(tag_id)
+        async with self.tag_repo.db.begin_nested():
+            tag_to_delete = await self.get_tag_by_id(tag_id)
 
-        # 业务规则：不允许删除正在被任何菜谱使用的标签
-        count_stmt = select(func.count(RecipeTagLink.recipe_id)).where(RecipeTagLink.tag_id == tag_id)
-        usage_count = await self.tag_repo.db.scalar(count_stmt)
-        if usage_count > 0:
-            raise BusinessRuleException(f"无法删除，该标签正在被 {usage_count} 个菜谱使用")
+            count_stmt = select(func.count(RecipeTagLink.recipe_id)).where(RecipeTagLink.tag_id == tag_id)
+            usage_count = await self.tag_repo.db.scalar(count_stmt)
+            if usage_count > 0:
+                raise BusinessRuleException(f"无法删除，该标签正在被 {usage_count} 个菜谱使用")
 
-        try:
-            # 调用的是父类的 delete，它只在 session 中删除，不 commit
             await self.tag_repo.soft_delete(tag_to_delete)
-            await self.tag_repo.commit()
-        except Exception as e:
-            self.logger.error(f"删除标签 {tag_id} 失败: {e}")
-            await self.tag_repo.rollback()
-            raise e
 
     async def merge_tags(self, payload: TagMergePayload) -> dict:
         """【新增】将多个源标签合并到一个目标标签。"""
         source_ids = list(set(payload.source_tag_ids))
         target_id = payload.target_tag_id
 
-        async with self.tag_repo.db.begin():
+        async with self.tag_repo.db.begin_nested():
             if target_id in source_ids:
                 raise BusinessRuleException("目标标签不能是被合并的源标签之一。")
             if not await self.tag_repo.are_ids_valid(source_ids + [target_id]):
@@ -130,7 +124,7 @@ class TagService(BaseService):
         unique_tag_ids = list(set(tag_ids))
 
         # --- 在一个事务中完成所有检查和操作 ---
-        async with self.tag_repo.db.begin():
+        async with self.tag_repo.db.begin_nested():
             # 1. 业务规则校验：确认所有要删除的标签都存在
             tags_to_delete = await self.tag_repo.get_by_ids(unique_tag_ids)
             if len(tags_to_delete) != len(unique_tag_ids):
@@ -158,7 +152,7 @@ class TagService(BaseService):
         if not tag_ids:
             return 0
 
-        async with self.tag_repo.db.begin():
+        async with self.tag_repo.db.begin_nested():
             # 校验这些 ID 是否确实是已删除状态
             tags_to_restore = await self.tag_repo.get_by_ids(tag_ids, view_mode=ViewMode.DELETED.value)
             if len(tags_to_restore) != len(set(tag_ids)):
@@ -173,7 +167,7 @@ class TagService(BaseService):
         if not tag_ids:
             return 0
 
-        async with self.tag_repo.db.begin():
+        async with self.tag_repo.db.begin_nested():
             # 业务规则：通常只允许永久删除那些已经被软删除的标签
             tags_to_delete = await self.tag_repo.get_by_ids(tag_ids, view_mode=ViewMode.DELETED.value)
             if len(tags_to_delete) != len(set(tag_ids)):
