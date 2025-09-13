@@ -1,6 +1,7 @@
 from typing import Optional, List
 import uuid
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Relationship
 from app.models._model_utils.guid import GUID
 from app.models.base.base_model import BaseModel, AutoTableNameMixin
@@ -25,6 +26,9 @@ class RecipeTagLink(AutoTableNameMixin, SQLModel,  table=True):
     recipe_id: uuid.UUID = Field(foreign_key="recipe.id", primary_key=True, sa_type=GUID())
     tag_id: uuid.UUID = Field(foreign_key="tag.id", primary_key=True, sa_type=GUID())
 
+    __table_args__ = (
+        UniqueConstraint("recipe_id", "tag_id", name="uq_recipe_tag"),
+    )
 
 class RecipeStep(BaseModel, table=True):
     """结构化的烹饪步骤模型。"""
