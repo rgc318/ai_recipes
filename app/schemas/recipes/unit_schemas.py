@@ -1,7 +1,7 @@
 
 # app/schemas/unit_schemas.py
 
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,8 @@ class UnitBase(BaseModel):
 class UnitRead(UnitBase):
     """用于API响应的单位数据模型。"""
     id: UUID
+    ingredient_count: int = Field(0, description="使用此单位的配料数量")
+    is_deleted: bool = Field(False, description="是否已被软删除")  # <-- 【核心新增】
 
     model_config = {
         "from_attributes": True
@@ -37,3 +39,13 @@ class UnitUpdate(BaseModel):
 class UnitFilterParams(BaseModel):
     """单位列表（后台管理）的动态查询过滤参数。"""
     name: Optional[str] = Field(None, description="按单位名称或缩写模糊搜索")
+
+
+class BatchDeleteUnitsPayload(BaseModel):
+    """批量删除单位的请求体。"""
+    unit_ids: List[UUID] = Field(..., min_length=1)
+
+class UnitMergePayload(BaseModel):
+    """合并单位的请求体。"""
+    source_unit_ids: List[UUID] = Field(..., min_length=1, description="要被合并的源单位ID列表")
+    target_unit_id: UUID = Field(..., description="合并目标单位的ID")

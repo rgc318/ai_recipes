@@ -136,6 +136,10 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         if hasattr(self.model, "updated_at"):
             update_data["updated_at"] = datetime.now(timezone.utc)
 
+        user_id = self.context.get("user_id")
+        if user_id and hasattr(self.model, "updated_by"):
+            update_data["updated_by"] = user_id
+
         stmt = (
             update(self.model)
             .where(self.model.id == item_id)
@@ -265,10 +269,17 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         stmt = self._base_stmt(view_mode=view_mode).where(self.model.id.in_(ids))
         return await self._run_and_scalars(stmt, "get_by_ids")
 
-    def apply_ordering(self, stmt, order_by: List[str]):
-        # 优化排序，使其接收列表，并去掉冒号约定
+    def apply_ordering(self, stmt, order_by: List[str], sort_map: Dict[str, Any]):
+        """
+        【最终版】应用排序逻辑，支持多条件排序。
+        """
         if not order_by:
-            return stmt.order_by(desc(self.model.created_at))  # 默认排序
+            if hasattr(self.model, "created_at"):
+                return stmt.order_by(desc(self.model.created_at))
+            return stmt
+
+        # 1. 创建一个空列表，用于收集所有排序条件
+        order_clauses = []
 
         for sort_field in order_by:
             order_func = asc
@@ -276,9 +287,20 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
                 sort_field = sort_field[1:]
                 order_func = desc
 
-            column = getattr(self.model, sort_field, None)
-            if column:
-                stmt = stmt.order_by(order_func(column))
+            column = sort_map.get(sort_field)
+            if column is None:
+                column = getattr(self.model, sort_field, None)
+
+            if column is not None:
+                # 2. 不直接调用 .order_by()，而是将排序表达式添加到列表中
+                order_clauses.append(order_func(column))
+            else:
+                self.logger.warning(f"无法找到排序字段: {sort_field}，已忽略。")
+
+        # 3. 如果收集到了排序条件，则在循环结束后，一次性应用所有条件
+        if order_clauses:
+            stmt = stmt.order_by(*order_clauses)
+
         return stmt
 
     # def apply_filters(self, stmt, filters: Dict[str, Any]):
@@ -456,7 +478,8 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             sort_by: Optional[List[str]] = None,
             view_mode: str = ViewMode.ACTIVE,  # <-- 【新增】接收 view_mode
             eager_loads: Optional[List[Any]] = None,
-            stmt_in: Optional[Any] = None  # 1. 【关键修复】在这里添加 stmt_in 参数
+            stmt_in: Optional[Any] = None,  # 1. 【关键修复】在这里添加 stmt_in 参数
+            sort_map: Optional[Dict[str, Any]] = None
     ) -> PageResponse[ModelType]:
         """
         【全新】通用的、支持动态过滤和排序的分页查询方法。
@@ -464,6 +487,12 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         """
         # 2. 【关键修复】如果传入了预处理过的 statement，就使用它；否则，创建默认的
         stmt = stmt_in if stmt_in is not None else self._base_stmt(view_mode=view_mode)
+
+        if hasattr(self.model, 'is_deleted'):
+            if view_mode == ViewMode.ACTIVE:
+                stmt = stmt.where(self.model.is_deleted == False)
+            elif view_mode == ViewMode.DELETED:
+                stmt = stmt.where(self.model.is_deleted == True)
 
         # 3. 应用动态过滤
         stmt = self._apply_dynamic_filters(stmt, filters or {})
@@ -477,7 +506,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             return PageResponse(items=[], total=0, page=page, per_page=per_page, total_pages=0)
 
         # 5. 应用排序和分页
-        stmt = self.apply_ordering(stmt, sort_by or [])
+        stmt = self.apply_ordering(stmt, sort_by or [], sort_map or {})
         stmt = stmt.offset((page - 1) * per_page).limit(per_page)
 
         # 6. 应用预加载 (Eager Loading)
@@ -487,7 +516,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
 
         # 7. 执行查询并返回结果
         items_result = await self.db.execute(stmt)
-        items = items_result.unique().scalars().all()
+        items = items_result.unique().all()
 
         return PageResponse(
             items=items,
@@ -606,9 +635,6 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         result = await self.db.execute(stmt)
         return result.rowcount
 
-    async def hard_delete(self, db_obj: ModelType) -> None:
-        """【新增】从数据库中物理删除一个对象。"""
-        await self.delete(db_obj)  # 复用旧的 delete 逻辑
 
     async def restore(self, db_obj: ModelType) -> ModelType:
         """【新增】恢复一个被软删除的对象。"""
