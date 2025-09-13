@@ -14,11 +14,3 @@ class RegisterFailedException(BaseBusinessException):
 class InvalidCredentialsException(BaseBusinessException):
     def __init__(self, message: str = None):
         super().__init__(ResponseCodeEnum.INVALID_CREDENTIALS, message=message)
-
-class TokenExpiredException(BaseBusinessException):
-    def __init__(self, message: str = None):
-        super().__init__(ResponseCodeEnum.TOKEN_EXPIRED, message=message)
-
-class TokenInvalidException(BaseBusinessException):
-    def __init__(self, message: str = None):
-        super().__init__(ResponseCodeEnum.TOKEN_INVALID, message=message)
