@@ -64,3 +64,8 @@ class FileException(BaseBusinessException):
 class ConcurrencyConflictException(BaseBusinessException):
     def __init__(self, message: str = "操作失败，数据已被他人修改，请刷新后重试"):
         super().__init__(ResponseCodeEnum.ALREADY_EXISTS, message=message)
+
+
+# class UnauthorizedException(BaseBusinessException):
+#     def __init__(self, message: str = None):
+#         super().__init__(ResponseCodeEnum.AUTH_ERROR, message=message)

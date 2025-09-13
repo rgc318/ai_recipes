@@ -8,6 +8,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.exceptions import NotFoundException, ConcurrencyConflictException
 from app.core.exceptions.base_exception import PermissionDeniedException
+from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.recipes.recipe import Recipe, RecipeIngredient
 from app.repo.crud.common.category_repo import CategoryRepository
@@ -197,15 +198,23 @@ class RecipeService(BaseService):
         return recipe
 
     async def page_list_recipes(
-            self, page: int, per_page: int, sort_by: List[str], filters: Dict[str, Any], current_user: Optional[UserContext] = None
+            self, page: int,
+            per_page: int,
+            sort_by: List[str],
+            filters: Dict[str, Any],
+            current_user: Optional[UserContext] = None,
+            view_mode: str = ViewMode.ACTIVE
     ) -> PageResponse[RecipeSummaryRead]:
         if current_user:
             recipe_policy.can_list(current_user, Recipe)
-        paged_recipes_orm = await self.recipe_repo.get_paged_recipes(
-            page=page, per_page=per_page, sort_by=sort_by, filters=filters or {}
+
+        return await self.recipe_repo.get_paged_recipes(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            filters=filters or {},
+            view_mode=view_mode
         )
-        paged_recipes_orm.items = [RecipeSummaryRead.model_validate(item) for item in paged_recipes_orm.items]
-        return paged_recipes_orm
 
     async def create_recipe(
             self,

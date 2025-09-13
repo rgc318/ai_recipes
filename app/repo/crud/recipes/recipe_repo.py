@@ -19,7 +19,8 @@ from app.models.recipes.recipe import (
     RecipeTagLink,
     Unit, RecipeStep, RecipeStepImageLink, RecipeGalleryLink, Tag,
 )
-from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeIngredientInput, RecipeStepInput
+from app.schemas.recipes.recipe_schemas import RecipeCreate, RecipeUpdate, RecipeIngredientInput, RecipeStepInput, \
+    RecipeSummaryRead
 
 
 class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
@@ -51,15 +52,21 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         return result.unique().scalar_one_or_none()
 
     async def get_paged_recipes(
-            self, *, page: int, per_page: int, filters: Dict[str, Any], sort_by: List[str]
-    ) -> PageResponse[Recipe]:
+            self,
+            *,
+            page: int,
+            per_page: int,
+            filters: Dict[str, Any],
+            sort_by: List[str],
+            view_mode: str
+    ) -> PageResponse[RecipeSummaryRead]:
         """
         获取菜谱的分页列表，支持动态过滤和排序。
         此方法负责处理 Recipe 特有的过滤逻辑（如按标签、食材），
         然后调用通用的父类方法完成查询。
         """
         # 1. 开始一个基础查询语句 (已包含软删除过滤)
-        stmt = self._base_stmt()
+        stmt = select(self.model)
 
         # 2. 【预处理】处理 Recipe 特有的过滤逻辑
         # 按标签ID列表过滤
@@ -94,14 +101,30 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         ]
 
         # 4. 调用父类的、完全通用的分页方法，并传入预处理过的参数
-        return await self.get_paged_list(
+        paged_response = await self.get_paged_list(
             page=page,
             per_page=per_page,
-            filters=filters,  # 此处 filters 已被处理过
+            filters=filters,
             sort_by=sort_by,
             eager_loads=eager_loading_options,
-            stmt_in=stmt,  # 传入我们已经附加了 JOIN 的查询语句
+            stmt_in=stmt,
+            view_mode=view_mode,
         )
+
+        # 5. [核心] 在 Repo 层内部完成数据处理和转换
+        processed_items = []
+        for item_row in paged_response.items:
+            # 从 Row 对象 (单元素元组) 中，只取出第一个元素，也就是 Recipe ORM 对象
+            recipe_orm = item_row[0]
+
+            # 现在，用这个干净的 recipe_orm 对象来进行验证
+            recipe_dto = RecipeSummaryRead.model_validate(recipe_orm)
+            processed_items.append(recipe_dto)
+
+        # 6. 将处理好的 DTO 列表赋值回去
+        paged_response.items = processed_items
+
+        return paged_response
 
     # ==========================
     # 关联关系更新方法 (由 Service 层在事务中调用)

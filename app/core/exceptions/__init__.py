@@ -20,8 +20,7 @@ from .auth_exceptions import (
     LoginFailedException,
     RegisterFailedException,
     InvalidCredentialsException,
-    TokenExpiredException,
-    TokenInvalidException,
+
 )
 from .jwt_exceptions import (
     UnauthorizedException,
@@ -55,7 +54,6 @@ __all__ = [
     "RegisterFailedException",
     "InvalidCredentialsException",
     "TokenExpiredException",
-    "TokenInvalidException",
 
     "UnauthorizedException",
     "TokenRevokedException",
