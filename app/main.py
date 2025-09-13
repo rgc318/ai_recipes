@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.core.middleware import RequestScopeMiddleware
 from app.core.security.middleware import AuditMiddleware
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.infra.db.session import create_db_and_tables, get_session
@@ -113,6 +114,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 3. [核心] 按照正确的顺序注册中间件
+#    顺序至关重要！
+
+#    首先，注册负责设置请求上下文的 RequestScopeMiddleware。
+#    这样后续的中间件和接口才能从中获取 user_id。
+app.add_middleware(RequestScopeMiddleware)
+
+#    然后，注册需要读取上下文信息来进行审计的 AuditMiddleware。
 app.add_middleware(AuditMiddleware)
 app.include_router(api_router, prefix=settings.server.api_prefix)
 logger.info(app.routes)

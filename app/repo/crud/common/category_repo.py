@@ -3,13 +3,13 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
-from app.models.common.category_model import Category
-from app.schemas.common.category_schemas import CategoryCreate, CategoryUpdate
+from app.models.common.category_model import Category, RecipeCategoryLink
+from app.schemas.common.category_schemas import CategoryCreate, CategoryUpdate, CategoryRead
 
 
 class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate]):
@@ -120,21 +120,41 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
         return await self._run_and_scalar(stmt, "get_by_id_with_parent")
 
     async def get_paged_categories(
-            self, *, page: int, per_page: int, filters: Dict[str, Any], sort_by: List[str]
-    ) -> PageResponse[Category]:
-        """获取分类的分页列表（后台管理使用）。"""
-        # 2. 定义需要预加载的关系
-        eager_loading_options = [
-            selectinload(self.model.parent)  # 告诉 SQLAlchemy 把 parent 关系也一起查出来
-        ]
+            self, *, page: int, per_page: int, filters: Dict[str, Any], sort_by: List[str], view_mode: str
+    ) -> PageResponse:
+        """【升级后】获取分类的分页列表，并计算菜谱数量。"""
+        # 1. 定义计算字段和预加载选项
+        recipe_count_col = func.count(RecipeCategoryLink.recipe_id).label("recipe_count")
+        eager_loading_options = [selectinload(self.model.parent)]
 
-        return await self.get_paged_list(
+        # 2. 构建核心查询语句
+        stmt = (
+            select(self.model, recipe_count_col)
+            .outerjoin(RecipeCategoryLink, self.model.id == RecipeCategoryLink.category_id)
+            .group_by(self.model.id)
+        )
+
+        # 3. 调用强大的基类方法
+        paged_response = await self.get_paged_list(
             page=page,
             per_page=per_page,
             filters=filters,
             sort_by=sort_by,
-            eager_loads=eager_loading_options  # <-- 将预加载选项传递过去
+            view_mode=view_mode,
+            eager_loads=eager_loading_options,
+            stmt_in=stmt,
+            sort_map={'recipe_count': recipe_count_col}
         )
+
+        # 4. 将 ORM 元组转换为 DTO
+        processed_items = []
+        for category_orm, count in paged_response.items:
+            category_dto = CategoryRead.model_validate(category_orm)
+            category_dto.recipe_count = count if count is not None else 0
+            processed_items.append(category_dto)
+
+        paged_response.items = processed_items
+        return paged_response
 
     async def are_ids_valid(self, ids: List[UUID]) -> bool:
         """
@@ -154,3 +174,33 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
 
         # 如果数据库中存在的数量与我们传入的唯一ID数量相等，则所有ID都有效
         return existing_count == len(unique_ids)
+
+    async def get_recipe_ids_for_categories(self, category_ids: List[UUID]) -> List[UUID]:
+        """根据一组分类ID，获取所有关联的、不重复的菜谱ID。"""
+        if not category_ids:
+            return []
+        stmt = select(RecipeCategoryLink.recipe_id).where(RecipeCategoryLink.category_id.in_(category_ids)).distinct()
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def delete_links_for_categories(self, category_ids: List[UUID]) -> None:
+        """根据一组分类ID，删除 recipe_category_link 中间表中的所有相关记录。"""
+        if not category_ids:
+            return
+        stmt = delete(RecipeCategoryLink).where(RecipeCategoryLink.category_id.in_(category_ids))
+        await self.db.execute(stmt)
+
+    async def reparent_children(self, current_parent_ids: List[UUID], new_parent_id: UUID) -> int:
+        """
+        将一批父分类下的所有直接子分类，重新指定给一个新的父分类。
+        """
+        if not current_parent_ids:
+            return 0
+
+        stmt = (
+            update(self.model)
+            .where(self.model.parent_id.in_(current_parent_ids))
+            .values(parent_id=new_parent_id)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount

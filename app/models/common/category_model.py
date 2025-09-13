@@ -1,6 +1,8 @@
 # app/models/recipes/category_model.py
 from typing import List, Optional, TYPE_CHECKING
 import uuid
+
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship
 
 from app.models.base.base_model import BaseModel
@@ -13,6 +15,10 @@ if TYPE_CHECKING:
 class RecipeCategoryLink(BaseModel, table=True):
     recipe_id: uuid.UUID = Field(foreign_key="recipe.id", primary_key=True)
     category_id: uuid.UUID = Field(foreign_key="category.id", primary_key=True)
+
+    __table_args__ = (
+        UniqueConstraint("recipe_id", "category_id", name="uq_recipe_category"),
+    )
 
 
 class Category(BaseModel, table=True):

@@ -1,4 +1,5 @@
 # app/schemas/recipes/category_schemas.py
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -26,6 +27,10 @@ class CategoryParentRead(BaseModel):
 class CategoryRead(CategoryBase):
     id: UUID
     parent: Optional[CategoryParentRead] = None # <-- 新增的字段
+    is_deleted: bool = Field(False, description="是否已被软删除")  # <-- 【新增】
+    recipe_count: int = Field(0, description="关联的菜谱数量")  # <-- 【新增】
+    created_at: Optional[datetime] = None
+
     model_config = {"from_attributes": True}
 
 class CategoryReadWithChildren(CategoryRead):
@@ -44,3 +49,11 @@ class CategoryFilterParams(BaseModel):
     name: Optional[str] = Field(None, description="按分类名称进行模糊搜索")
     slug: Optional[str] = Field(None, description="按 slug 精确搜索")
     parent_id: Optional[UUID] = Field(None, description="按父分类ID筛选顶级分类下的子分类")
+
+
+class BatchDeleteCategoriesPayload(BaseModel): # <-- 【新增】
+    category_ids: List[UUID]
+
+class CategoryMergePayload(BaseModel): # <-- 【新增】
+    source_category_ids: List[UUID]
+    target_category_id: UUID

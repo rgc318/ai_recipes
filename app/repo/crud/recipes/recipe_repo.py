@@ -338,3 +338,31 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
 
         await self.db.execute(stmt)
         # 注意：这个方法是一个原子操作，Service层会负责 commit
+
+    async def add_categories_to_recipes(self, recipe_ids: List[UUID], category_ids: List[UUID]) -> None:
+        """
+        为一批菜谱批量添加一批分类关联。
+        使用 ON CONFLICT DO NOTHING 来避免创建重复的关联。
+        """
+        if not recipe_ids or not category_ids:
+            return
+
+        # 1. 构造需要插入的所有“菜谱-分类”关联对
+        new_links_data = [
+            {"recipe_id": recipe_id, "category_id": category_id}
+            for recipe_id in recipe_ids
+            for category_id in category_ids
+        ]
+
+        if not new_links_data:
+            return
+
+        # 2. 构建一个高效的“UPSERT”语句
+        #    如果 (recipe_id, category_id) 的组合已存在，则什么都不做
+        stmt = pg_insert(RecipeCategoryLink).values(new_links_data)
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=['recipe_id', 'category_id']
+        )
+
+        # 3. 执行语句
+        await self.db.execute(stmt)
