@@ -143,7 +143,8 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
             view_mode=view_mode,
             eager_loads=eager_loading_options,
             stmt_in=stmt,
-            sort_map={'recipe_count': recipe_count_col}
+            sort_map={'recipe_count': recipe_count_col},
+            return_scalars=False
         )
 
         # 4. 将 ORM 元组转换为 DTO

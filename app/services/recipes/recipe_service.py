@@ -4,13 +4,18 @@ from typing import Dict, Any, List, Union, Optional, TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import Depends
+from sqlalchemy import delete
 from sqlalchemy.orm.exc import StaleDataError
+from sqlmodel import select
 
 from app.core.exceptions import NotFoundException, ConcurrencyConflictException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.recipes.recipe import Recipe, RecipeIngredient
+from app.models.common.category_model import RecipeCategoryLink
+from app.models.files.file_record import FileRecord
+from app.models.recipes.recipe import Recipe, RecipeIngredient, RecipeTagLink, RecipeStep, RecipeStepImageLink, \
+    RecipeGalleryLink
 from app.repo.crud.common.category_repo import CategoryRepository
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.schemas.file.file_schemas import AvatarLinkDTO, RecipeImageLinkDTO
@@ -34,9 +39,11 @@ class RecipeService(BaseService):
     def __init__(
             self,
             factory: RepositoryFactory,
+            current_user: Optional[UserContext] = None,
     ):
         super().__init__()
         self.factory = factory
+        self.current_user = current_user
         # 从工厂获取所有需要的 Repository 实例
         self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)
         self.tag_repo: TagRepository = factory.get_repo_by_type(TagRepository)
@@ -189,8 +196,8 @@ class RecipeService(BaseService):
             # 【修改】传入 recipe_orm 对象
             await self.recipe_repo.set_recipe_categories(recipe_orm, recipe_in.category_ids)
 
-    async def get_recipe_details(self, recipe_id: UUID, current_user: Optional[UserContext] = None) -> Recipe:
-        recipe = await self.recipe_repo.get_by_id_with_details(recipe_id)
+    async def get_recipe_details(self, recipe_id: UUID, current_user: Optional[UserContext] = None, view_mode: str = ViewMode.ACTIVE.value) -> Recipe:
+        recipe = await self.recipe_repo.get_by_id_with_details(recipe_id, view_mode)
         if not recipe:
             raise NotFoundException("菜谱不存在")
         if current_user:
@@ -235,95 +242,76 @@ class RecipeService(BaseService):
         files_to_move: List[Dict[str, Any]] = []
         recipe_orm: Optional[Recipe] = None
 
-        try:
-            try:
-                # --- 阶段一: 数据库事务 ---
-                recipe_orm = await self.recipe_repo.create(recipe_data)
-                await self.recipe_repo.flush()  # 获取 recipe_orm.id
+        async with self.recipe_repo.db.begin_nested():
+            # --- 阶段一: 数据库事务 ---
+            recipe_orm = await self.recipe_repo.create(recipe_data)
+            await self.recipe_repo.flush()  # 获取 recipe_orm.id
+            # ▼▼▼ 【核心修复】▼▼▼
+            # 2. 重新获取这个刚刚创建的对象，但这次要用我们强大的、
+            #    带有预加载功能的方法，确保所有关系都被正确初始化！
+            recipe_orm_with_relations = await self.recipe_repo.get_by_id_with_details(recipe_orm.id)
+            if not recipe_orm_with_relations:
+                # 这是一个不太可能发生的边缘情况，但做好防御性编程
+                raise Exception("Failed to reload newly created recipe.")
+            # 【核心修改】调用统一的关联处理方法
+            await self._handle_recipe_relations(recipe_orm_with_relations, recipe_in)
+            # ▼▼▼ 【4. 新增】收集所有需要移动的文件信息 ▼▼▼
+            all_file_ids = []
+            if recipe_in.cover_image_id:
+                all_file_ids.append(recipe_in.cover_image_id)
+            if recipe_in.gallery_image_ids:
+                all_file_ids.extend(recipe_in.gallery_image_ids)
+            for step in recipe_in.steps or []:
+                if step.image_ids:
+                    all_file_ids.extend(step.image_ids)
+            if all_file_ids:
+                unique_file_ids = list(set(all_file_ids))
+                file_records = await self.file_repo.get_by_ids(unique_file_ids)
+                if len(file_records) != len(unique_file_ids):
+                    raise NotFoundException("一个或多个指定的图片文件不存在")
+                for record in file_records:
+                    if getattr(record, 'is_associated', False):
+                        raise NotFoundException(f"文件 {record.original_filename} 已被使用，无法关联。")
+                    temp_path = record.object_name
+                    filename = os.path.basename(temp_path)
+                    # 根据文件用途构建不同的最终路径
+                    # (这是一个简化的例子，您可以设计更复杂的规则)
+                    # if record.id == recipe_in.cover_image_id:
+                    #     subfolder = "cover"
+                    # else:
+                    #     subfolder = "gallery"  # 简化处理，步骤图也放入gallery
+                    permanent_path = f"recipes/{recipe_orm_with_relations.id}/{filename}"
+                    files_to_move.append({"source": temp_path, "dest": permanent_path, "record_id": record.id})
+                    # 更新数据库记录
+                    await file_record_service.update_file_record(
+                        record.id, FileRecordUpdate(object_name=permanent_path, is_associated=True), commit=False
+                    )
+            # ▲▲▲ 新增结束 ▲▲▲
+            # --- 阶段二: 外部非事务性操作 ---
+        if files_to_move:
+            for move_op in files_to_move:
+                try:
+                    await file_service.move_file(
+                        source_key=move_op["source"],
+                        destination_key=move_op["dest"],
+                        profile_name="recipe_images"
+                    )
+                except Exception as move_error:
+                    self.logger.critical(
+                        f"CRITICAL: Recipe {recipe_orm_with_relations.id} DB created, but failed to move image from {move_op['source']} to {move_op['dest']}. Error: {move_error}")
+            # 刷新后返回完整的菜谱对象
+        return await self.get_recipe_details(recipe_orm_with_relations.id, user_context)
 
-                # ▼▼▼ 【核心修复】▼▼▼
-                # 2. 重新获取这个刚刚创建的对象，但这次要用我们强大的、
-                #    带有预加载功能的方法，确保所有关系都被正确初始化！
-                recipe_orm_with_relations = await self.recipe_repo.get_by_id_with_details(recipe_orm.id)
-                if not recipe_orm_with_relations:
-                    # 这是一个不太可能发生的边缘情况，但做好防御性编程
-                    raise Exception("Failed to reload newly created recipe.")
 
-
-                # 【核心修改】调用统一的关联处理方法
-                await self._handle_recipe_relations(recipe_orm_with_relations, recipe_in)
-
-                # ▼▼▼ 【4. 新增】收集所有需要移动的文件信息 ▼▼▼
-                all_file_ids = []
-                if recipe_in.cover_image_id:
-                    all_file_ids.append(recipe_in.cover_image_id)
-                if recipe_in.gallery_image_ids:
-                    all_file_ids.extend(recipe_in.gallery_image_ids)
-                for step in recipe_in.steps or []:
-                    if step.image_ids:
-                        all_file_ids.extend(step.image_ids)
-
-                if all_file_ids:
-                    unique_file_ids = list(set(all_file_ids))
-                    file_records = await self.file_repo.get_by_ids(unique_file_ids)
-                    if len(file_records) != len(unique_file_ids):
-                        raise NotFoundException("一个或多个指定的图片文件不存在")
-
-                    for record in file_records:
-                        if getattr(record, 'is_associated', False):
-                            raise NotFoundException(f"文件 {record.original_filename} 已被使用，无法关联。")
-
-                        temp_path = record.object_name
-                        filename = os.path.basename(temp_path)
-
-                        # 根据文件用途构建不同的最终路径
-                        # (这是一个简化的例子，您可以设计更复杂的规则)
-                        # if record.id == recipe_in.cover_image_id:
-                        #     subfolder = "cover"
-                        # else:
-                        #     subfolder = "gallery"  # 简化处理，步骤图也放入gallery
-
-                        permanent_path = f"recipes/{recipe_orm_with_relations.id}/{filename}"
-                        files_to_move.append({"source": temp_path, "dest": permanent_path, "record_id": record.id})
-
-                        # 更新数据库记录
-                        await file_record_service.update_file_record(
-                            record.id, FileRecordUpdate(object_name=permanent_path, is_associated=True), commit=False
-                        )
-                # ▲▲▲ 新增结束 ▲▲▲
-
-                await self.recipe_repo.commit()
-
-            except Exception as e:
-                self.logger.error(f"创建菜谱失败: {e}")
-                await self.recipe_repo.rollback()
-                raise e
-
-                # --- 阶段二: 外部非事务性操作 ---
-            if files_to_move:
-                for move_op in files_to_move:
-                    try:
-                        await file_service.move_file(
-                            source_key=move_op["source"],
-                            destination_key=move_op["dest"],
-                            profile_name="recipe_images"
-                        )
-                    except Exception as move_error:
-                        self.logger.critical(
-                            f"CRITICAL: Recipe {recipe_orm_with_relations.id} DB created, but failed to move image from {move_op['source']} to {move_op['dest']}. Error: {move_error}")
-
-                # 刷新后返回完整的菜谱对象
-            return await self.get_recipe_details(recipe_orm_with_relations.id)
-        except Exception as e:
-            # 【优化】如果事务成功但移动文件失败，可能会留下已移动的文件，需要清理
-            # 这是一个复杂的补偿逻辑，暂简化为记录日志
-            self.logger.error(f"创建菜谱的整体流程失败: {e}")
-            # 可以考虑在这里添加清理已移动文件的逻辑
-            raise e
-
-    async def update_recipe(self, recipe_id: UUID, recipe_in: RecipeUpdate, user_context: UserContext) -> Recipe:
+    async def update_recipe(
+            self,
+            recipe_id: UUID,
+            recipe_in: RecipeUpdate,
+            user_context: UserContext,
+            file_service: "FileService"  # 1. 在这里添加 file_service 参数
+    ) -> Recipe:
         """【最终版】更新菜谱，采用“购物车”模式，一次性处理所有变更。"""
-        recipe_orm = await self.get_recipe_details(recipe_id)
+        recipe_orm = await self.get_recipe_details(recipe_id, user_context)
         recipe_policy.can_update(user_context, recipe_orm)
 
         # 提取用于更新 Recipe 主表的常规字段
@@ -332,7 +320,7 @@ class RecipeService(BaseService):
             exclude={"tags", "ingredients", "steps", "cover_image_id", "gallery_image_ids", "category_ids",
                      "images_to_add", "images_to_delete", "images_order"}  # 排除图片操作字段
         )
-        try:
+        async with self.recipe_repo.db.begin_nested():
             # --- 开启一个大事务 ---
             if update_data:
                 await self.recipe_repo.update(recipe_orm, update_data)
@@ -342,24 +330,18 @@ class RecipeService(BaseService):
 
             # 【核心逻辑】处理图片集合的“差量”更新
             if recipe_in.images_to_delete:
-                await self.remove_images_from_gallery(recipe_id, recipe_in.images_to_delete, user_context, commit=False)
+                await self.remove_images_from_gallery(
+                    recipe_id,
+                    recipe_in.images_to_delete,
+                    user_context,
+                    file_service
+                )
 
             if recipe_in.images_to_add:
-                await self.add_images_to_gallery(recipe_id, recipe_in.images_to_add, user_context, commit=False)
-
-            # 提交整个大事务
-            await self.recipe_repo.commit()
-
-        except StaleDataError:
-            await self.recipe_repo.rollback()
-            raise ConcurrencyConflictException("操作失败，菜谱数据已被他人修改，请刷新后重试")
-        except Exception as e:
-            self.logger.error(f"更新菜谱 {recipe_id} 失败: {e}")
-            await self.recipe_repo.rollback()
-            raise e
+                await self.add_images_to_gallery(recipe_id, recipe_in.images_to_add, user_context)
 
         # 刷新并返回最新数据
-        return await self.get_recipe_details(recipe_id)
+        return await self.get_recipe_details(recipe_id, user_context)
 
     # =================================================================
     # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心新增图片管理方法 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
@@ -410,7 +392,7 @@ class RecipeService(BaseService):
         old_cover_record_id = recipe_orm.cover_image_id
         old_cover_object_name = recipe_orm.cover_image.object_name if recipe_orm.cover_image else None
 
-        try:
+        async with self.recipe_repo.db.begin_nested():
             # --- 数据库事务开始 ---
             # 1. 登记新文件
             new_file_record = await file_record_service.register_uploaded_file(
@@ -432,13 +414,6 @@ class RecipeService(BaseService):
             if old_cover_record_id:
                 await self._cleanup_old_file_records(old_cover_record_id)
 
-            # 4. 提交整个事务
-            await self.recipe_repo.commit()
-
-        except Exception as e:
-            await self.recipe_repo.rollback()
-            raise e
-
         # --- 事务成功后，清理外部【物理文件】 ---
         if old_cover_record_id:
             old_record = await self.file_repo.get_by_id_including_deleted(old_cover_record_id)
@@ -451,19 +426,16 @@ class RecipeService(BaseService):
         return await self.get_recipe_details(recipe_id)
 
     async def add_images_to_gallery(self, recipe_id: UUID, file_record_ids: List[UUID], user_context: UserContext,
-                                    commit: bool = True) -> None:
+                                    ) -> None:
         """【新增】为一个已存在的菜谱图库批量新增图片。"""
         recipe = await self.get_recipe_details(recipe_id, user_context)
         file_records = await self.file_repo.get_by_ids(file_record_ids)
         if len(file_records) != len(set(file_record_ids)):
             raise NotFoundException("一个或多个要关联的文件记录不存在")
 
-        try:
+        async with self.recipe_repo.db.begin_nested():
             await self.recipe_repo.add_gallery_images(recipe, file_record_ids)
-            if commit: await self.recipe_repo.commit()
-        except Exception as e:
-            if commit: await self.recipe_repo.rollback()
-            raise e
+
 
     async def remove_images_from_gallery(
             self,
@@ -471,8 +443,6 @@ class RecipeService(BaseService):
             image_record_ids: List[UUID],
             user_context: UserContext,
             file_service: "FileService",  # <-- 新增参数
-            commit: bool = True,
-
     ) -> None:
         """【新增】从菜谱图库中批量删除图片。"""
         recipe = await self.get_recipe_details(recipe_id, user_context)
@@ -484,14 +454,11 @@ class RecipeService(BaseService):
 
         object_names_to_delete = [r.object_name for r in records_to_delete]
 
-        try:
+        async with self.recipe_repo.db.begin_nested():
             # DB 事务
             await self.recipe_repo.remove_gallery_images(recipe, image_record_ids)
             await self.file_repo.soft_delete_by_ids(image_record_ids)
-            if commit: await self.recipe_repo.commit()
-        except Exception as e:
-            if commit: await self.recipe_repo.rollback()
-            raise e
+
 
         # 外部文件清理
         if object_names_to_delete:
@@ -500,51 +467,39 @@ class RecipeService(BaseService):
             except Exception as e:
                 self.logger.error(
                     f"DB records deleted, but failed to delete physical files: {object_names_to_delete}. Error: {e}")
-    async def delete_recipe(self, recipe_id: UUID, user_context: UserContext) -> None:
-        recipe_to_delete = await self.recipe_repo.get_by_id(recipe_id)
-        if not recipe_to_delete:
-            raise NotFoundException("菜谱不存在")
 
-        recipe_policy.can_delete(user_context, recipe_to_delete)
-        try:
-            self.recipe_repo.context['user_id'] = user_context.id
+    async def delete_recipe(self, recipe_id: UUID, user_context: UserContext) -> None:
+        """【修改后】软删除指定菜谱。"""
+        async with self.recipe_repo.db.begin_nested():
+            recipe_to_delete = await self.recipe_repo.get_by_id(recipe_id)
+            if not recipe_to_delete:
+                raise NotFoundException("菜谱不存在")
+            recipe_policy.can_delete(user_context, recipe_to_delete)
             await self.recipe_repo.soft_delete(recipe_to_delete)
-            await self.recipe_repo.commit()
-        except Exception as e:
-            self.logger.error(f"删除菜谱 {recipe_id} 失败: {e}")
-            await self.recipe_repo.rollback()
-            raise e
 
     # =================================================================
     # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心新增功能 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
     # =================================================================
-    async def batch_delete_recipes(self, recipe_ids: List[UUID], current_user: UserContext) -> int:
-        if not recipe_ids:
-            return 0
-
-        recipes_to_delete = await self.recipe_repo.get_by_ids(recipe_ids)
-        if len(recipes_to_delete) != len(set(recipe_ids)):
-            raise NotFoundException("一个或多个指定的菜谱不存在")
-
-        # 【权限检查】在循环中复用权限检查
-        for recipe in recipes_to_delete:
-            recipe_policy.can_delete(current_user, recipe)
-
-        try:
-            deleted_count = await self.recipe_repo.soft_delete_by_ids(recipe_ids)
-            await self.recipe_repo.commit()
-            return deleted_count
-        except Exception as e:
-            self.logger.error(f"批量删除菜谱失败: {e}")
-            await self.recipe_repo.rollback()
-            raise e
-
-    async def add_image_to_step(self, recipe_id: UUID, step_id: UUID, file_record_id: UUID,
-                                user_context: UserContext) -> None:
-        """为一个已存在的菜谱步骤新增一张图片。"""
-        # 权限检查等...
-        await self.recipe_repo.add_step_images(step_id, [file_record_id])
-        await self.recipe_repo.commit()
+    # async def batch_delete_recipes(self, recipe_ids: List[UUID], current_user: UserContext) -> int:
+    #     if not recipe_ids:
+    #         return 0
+    #
+    #     recipes_to_delete = await self.recipe_repo.get_by_ids(recipe_ids)
+    #     if len(recipes_to_delete) != len(set(recipe_ids)):
+    #         raise NotFoundException("一个或多个指定的菜谱不存在")
+    #
+    #     # 【权限检查】在循环中复用权限检查
+    #     for recipe in recipes_to_delete:
+    #         recipe_policy.can_delete(current_user, recipe)
+    #
+    #     try:
+    #         deleted_count = await self.recipe_repo.soft_delete_by_ids(recipe_ids)
+    #         await self.recipe_repo.commit()
+    #         return deleted_count
+    #     except Exception as e:
+    #         self.logger.error(f"批量删除菜谱失败: {e}")
+    #         await self.recipe_repo.rollback()
+    #         raise e
 
     async def remove_images_from_step(
             self,
@@ -553,7 +508,6 @@ class RecipeService(BaseService):
             image_record_ids: List[UUID],
             user_context: UserContext,
             file_service: "FileService",
-            commit: bool = True
     ) -> None:
         """【新增】从菜谱步骤中批量删除图片(包含物理文件)。"""
 
@@ -571,20 +525,11 @@ class RecipeService(BaseService):
         # 3. 记下物理文件的 object_name，以便在事务成功后删除
         object_names_to_delete = [r.object_name for r in records_to_delete]
 
-        try:
-            # --- 数据库事务 ---
-            # a. 删除步骤与图片的关联
+        async with self.recipe_repo.db.begin_nested():
             await self.recipe_repo.remove_step_images(step_id, image_record_ids)
-            # b. 软删除文件记录本身
             await self.file_repo.soft_delete_by_ids(image_record_ids)
-            if commit:
-                await self.recipe_repo.commit()
-        except Exception as e:
-            if commit:
-                await self.recipe_repo.rollback()
-            raise e
 
-        # --- 外部文件清理 ---
+        # 【修改】文件清理逻辑现在是可达的
         if object_names_to_delete:
             try:
                 await file_service.delete_files(object_names_to_delete, profile_name="recipe_images")
@@ -598,7 +543,6 @@ class RecipeService(BaseService):
             step_id: UUID,
             file_record_ids: List[UUID],
             user_context: UserContext,
-            commit: bool = True
     ) -> None:
         """【新增】为一个已存在的菜谱步骤批量新增图片。"""
 
@@ -615,12 +559,113 @@ class RecipeService(BaseService):
         if len(file_records) != len(set(file_record_ids)):
             raise NotFoundException("一个或多个要关联的文件记录不存在")
 
-        try:
-            # 4. 调用 Repository 的批量方法
+        async with self.recipe_repo.db.begin_nested():
             await self.recipe_repo.add_step_images(step_id, file_record_ids)
-            if commit:
-                await self.recipe_repo.commit()
-        except Exception as e:
-            if commit:
-                await self.recipe_repo.rollback()
-            raise e
+
+    async def batch_delete_recipes(self, recipe_ids: List[UUID], current_user: UserContext) -> int:
+        """【修改后】批量软删除菜谱。"""
+        if not recipe_ids:
+            return 0
+
+        async with self.recipe_repo.db.begin_nested():
+            recipes_to_delete = await self.recipe_repo.get_by_ids(recipe_ids)
+            if len(recipes_to_delete) != len(set(recipe_ids)):
+                raise NotFoundException("一个或多个指定的菜谱不存在")
+
+            for recipe in recipes_to_delete:
+                recipe_policy.can_delete(current_user, recipe)
+
+            return await self.recipe_repo.soft_delete_by_ids(recipe_ids)
+
+    async def restore_recipes(self, recipe_ids: List[UUID], current_user: UserContext) -> int:
+        """批量恢复软删除的菜谱。"""
+        if not recipe_ids:
+            return 0
+
+        async with self.recipe_repo.db.begin_nested():
+            recipes_to_restore = await self.recipe_repo.get_by_ids(recipe_ids, view_mode=ViewMode.DELETED.value)
+            if len(recipes_to_restore) != len(set(recipe_ids)):
+                raise NotFoundException("一个或多个要恢复的菜谱不存在于回收站中。")
+
+            # 权限检查：确保用户有权操作这些菜谱（即使在回收站中）
+            for recipe in recipes_to_restore:
+                recipe_policy.can_update(current_user, recipe)  # 恢复可视为一种更新操作
+
+            return await self.recipe_repo.restore_by_ids(recipe_ids)
+
+    async def hard_delete_recipes(
+            self,
+            recipe_ids: List[UUID],
+            current_user: UserContext,
+            file_service: "FileService"
+    ) -> int:
+        """批量永久删除菜谱，并清理所有关联的物理文件。"""
+        if not recipe_ids:
+            return 0
+
+        files_to_delete_after_commit: List[FileRecord] = []
+        deleted_count = 0
+
+        async with self.recipe_repo.db.begin_nested():
+            recipes_to_delete = await self.recipe_repo.get_by_ids(recipe_ids, view_mode=ViewMode.DELETED.value)
+            if len(recipes_to_delete) != len(set(recipe_ids)):
+                raise NotFoundException("一个或多个要永久删除的菜谱不存在于回收站中。")
+
+            for recipe in recipes_to_delete:
+                recipe_policy.can_delete(current_user, recipe)  # 权限检查
+
+            # 1. 在事务内，收集所有需要删除的文件记录
+            files_to_delete_after_commit = await self.recipe_repo.get_all_associated_file_records(recipe_ids)
+
+            # 1. 找到所有待刪除菜譜下的所有步驟 ID
+            steps_to_delete_stmt = select(RecipeStep.id).where(RecipeStep.recipe_id.in_(recipe_ids))
+            steps_result = await self.recipe_repo.db.execute(steps_to_delete_stmt)
+            step_ids = steps_result.scalars().all()
+
+            # 2. 如果找到了步驟，就先清理最深層的依賴：步驟-圖片關聯
+            if step_ids:
+                await self.recipe_repo.db.execute(
+                    delete(RecipeStepImageLink).where(RecipeStepImageLink.step_id.in_(step_ids))
+                )
+
+            # 2. 软删除文件记录（以便保留审计信息）
+            if file_ids_to_soft_delete := [f.id for f in files_to_delete_after_commit]:
+                await self.file_repo.soft_delete_by_ids(file_ids_to_soft_delete)
+
+            # 清理 recipe_tag_link (已有的)
+            await self.recipe_repo.db.execute(
+                delete(RecipeTagLink).where(RecipeTagLink.recipe_id.in_(recipe_ids))
+            )
+
+            # 2. 清理多对多关联：分类 (recipe_category_link)
+            await self.recipe_repo.db.execute(
+                delete(RecipeCategoryLink).where(RecipeCategoryLink.recipe_id.in_(recipe_ids))
+            )
+
+            await self.recipe_repo.db.execute(
+                delete(RecipeGalleryLink).where(RecipeGalleryLink.recipe_id.in_(recipe_ids)))  # <-- 【核心新增】
+
+            # 【核心新增】清理 recipe_ingredient
+            await self.recipe_repo.db.execute(
+                delete(RecipeIngredient).where(RecipeIngredient.recipe_id.in_(recipe_ids))
+            )
+
+            # 4. 【核心新增】清理一对多关联：步骤 (recipe_step)
+            await self.recipe_repo.db.execute(
+                delete(RecipeStep).where(RecipeStep.recipe_id.in_(recipe_ids))
+            )
+
+            # 3. 物理删除菜谱记录 (这会自动清理 recipe_tag_link 等关联表)
+            deleted_count = await self.recipe_repo.hard_delete_by_ids(recipe_ids)
+
+        # --- 事务成功后，开始清理外部物理文件 ---
+        if files_to_delete_after_commit:
+            object_names_to_delete = [f.object_name for f in files_to_delete_after_commit if f.object_name]
+            if object_names_to_delete:
+                try:
+                    await file_service.delete_files(object_names_to_delete, profile_name="recipe_images")
+                except Exception as e:
+                    self.logger.error(
+                        f"DB records for recipes {recipe_ids} deleted, but failed to delete physical files: {object_names_to_delete}. Error: {e}")
+
+        return deleted_count

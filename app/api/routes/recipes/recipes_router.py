@@ -11,6 +11,7 @@ from app.api.dependencies.service_getters.common_service_getter import get_recip
 from app.core.exceptions import BaseBusinessException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.core.security.security import get_current_user
+from app.enums.query_enums import ViewMode
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.common.payloads import BatchAddImagesPayload
@@ -19,7 +20,7 @@ from app.schemas.recipes.recipe_schemas import (
     RecipeRead,
     RecipeCreate,
     RecipeUpdate,
-    RecipeFilterParams, RecipeSummaryRead,  # 我们需要为 Recipe 创建一个 FilterParams
+    RecipeFilterParams, RecipeSummaryRead, BatchDeleteRecipesPayload,  # 我们需要为 Recipe 创建一个 FilterParams
 )
 from app.schemas.users.user_context import UserContext
 from app.schemas.users.user_schemas import BatchDeletePayload
@@ -32,6 +33,51 @@ router = APIRouter(
     # dependencies=[Depends(require_verified_user)], # 所有菜谱接口都需要用户先登录
 )
 
+
+@router.post(
+    "/restore",
+    summary="[管理员] 批量恢复菜谱",
+    response_model=StandardResponse[dict],
+)
+async def restore_recipes(
+    payload: BatchDeleteRecipesPayload,
+    service: RecipeService = Depends(get_recipes_service),
+    current_user: UserContext = Depends(get_current_user)
+):
+    """从回收站中批量恢复菜谱。"""
+    restored_count = await service.restore_recipes(payload.recipe_ids, current_user)
+    return response_success(data={"restored_count": restored_count}, message=f"成功恢复 {restored_count} 个菜谱")
+
+@router.delete(
+    "/batch",
+    summary="[管理员] 批量软删除菜谱",
+    response_model=StandardResponse[dict],
+)
+async def batch_delete_recipes(
+    payload: BatchDeleteRecipesPayload, # <-- 【修改】使用专用 Schema
+    service: RecipeService = Depends(get_recipes_service),
+    current_user: UserContext = Depends(get_current_user)
+):
+    deleted_count = await service.batch_delete_recipes(
+        recipe_ids=payload.recipe_ids,
+        current_user=current_user
+    )
+    return response_success(data={"deleted_count": deleted_count}, message=f"成功删除 {deleted_count} 个菜谱")
+
+@router.delete(
+    "/permanent-delete",
+    summary="[管理员] 批量永久删除菜谱",
+    response_model=StandardResponse[dict],
+)
+async def permanent_delete_recipes(
+    payload: BatchDeleteRecipesPayload,
+    service: RecipeService = Depends(get_recipes_service),
+    file_service: FileService = Depends(get_file_service), # 需要注入 FileService
+    current_user: UserContext = Depends(get_current_user),
+):
+    """从数据库中永久删除菜谱，并清理其所有关联的图片文件。"""
+    deleted_count = await service.hard_delete_recipes(payload.recipe_ids, current_user, file_service)
+    return response_success(data={"deleted_count": deleted_count}, message=f"成功永久删除 {deleted_count} 个菜谱")
 
 @router.post(
     "/{recipe_id}/gallery-images",
@@ -192,10 +238,11 @@ async def list_recipes_paginated(
     per_page: int = Query(10, ge=1, le=100, description="每页数量"),
     sort: Optional[str] = Query("-created_at", description="排序字段"),
     filter_params: RecipeFilterParams = Depends(),
-    # 【优化】新增 category_id 筛选
+    view_mode: ViewMode = Query(ViewMode.ACTIVE, description="查看模式"),
     category_id: Optional[UUID] = Query(None, description="根据分类ID精确过滤"),
     tag_ids: Optional[List[UUID]] = Query(None, description="根据关联的标签ID列表过滤"),
     # ingredient_ids: Optional[List[UUID]] = Query(None, description="根据关联的食材ID列表过滤"), # 如果需要也可以加上
+    current_user: Optional[UserContext] = Depends(get_current_user), # 列表页可匿名访问
 ):
     """
     获取菜谱的分页列表，支持丰富的动态过滤和排序。
@@ -215,7 +262,12 @@ async def list_recipes_paginated(
         filters["tag_ids__in"] = tag_ids
 
     page_data = await service.page_list_recipes(
-        page=page, per_page=per_page, sort_by=sort_by, filters=filters
+        page=page,
+        per_page=per_page,
+        sort_by=sort_by,
+        filters=filters,
+        current_user=current_user,
+        view_mode=view_mode
     )
     return response_success(data=page_data, message="获取菜谱列表成功")
 
@@ -226,13 +278,15 @@ async def list_recipes_paginated(
     summary="获取指定菜谱的详细信息",
 )
 async def get_recipe(
-    recipe_id: UUID, service: RecipeService = Depends(get_recipes_service)
+    recipe_id: UUID,
+    service: RecipeService = Depends(get_recipes_service),
+    # 1. 注入当前用户（即使是可选的，也需要注入）
+    current_user: Optional[UserContext] = Depends(get_current_user),
 ):
-    """
-    获取单个菜谱的完整信息，包括标签和配料详情。
-    """
+    """获取单个菜谱的完整信息，包括标签和配料详情。"""
     try:
-        recipe_orm = await service.get_recipe_details(recipe_id)
+        # 2. 将 current_user 传递给 service 层
+        recipe_orm = await service.get_recipe_details(recipe_id, current_user=current_user)
         return response_success(data=RecipeRead.model_validate(recipe_orm))
     except BaseBusinessException as e:
         return response_error(message=e.message)
@@ -247,6 +301,7 @@ async def update_recipe(
     recipe_id: UUID,
     recipe_in: RecipeUpdate,
     service: RecipeService = Depends(get_recipes_service),
+    file_service: FileService = Depends(get_file_service),
     current_user: UserContext = Depends(get_current_user),
 ):
     """
@@ -258,7 +313,10 @@ async def update_recipe(
     #     raise PermissionDeniedException()
     try:
         updated_recipe_orm = await service.update_recipe(
-            recipe_id, recipe_in, current_user
+            recipe_id,
+            recipe_in,
+            current_user,
+            file_service=file_service
         )
         return response_success(
             data=RecipeRead.model_validate(updated_recipe_orm), message="菜谱更新成功"
@@ -286,30 +344,8 @@ async def delete_recipe(
     # 此处同样可以加入权限判断
     try:
         await service.delete_recipe(recipe_id, current_user)
-        return response_success(data=None, message="菜谱删除成功")
+        return response_success(data=None, message="菜谱已移至回收站")
     except BaseBusinessException as e:
         return response_error(message=e.message)
 
-@router.delete(
-    "/batch",
-    summary="[管理员] 批量软删除菜谱",
-    response_model=StandardResponse[dict],
-)
-async def batch_delete_recipes(
-    payload: BatchDeletePayload, # 复用通用的批量删除Schema
-    service: RecipeService = Depends(get_recipes_service),
-    current_user: UserContext = Depends(get_current_user)
-):
-    """接收一个包含菜谱ID的数组，并批量软删除它们。"""
-    try:
-        # 假设 Service 层有 batch_delete_recipes 方法
-        deleted_count = await service.batch_delete_recipes(
-            recipe_ids=payload.ids,
-            current_user=current_user
-        )
-        return response_success(
-            data={"deleted_count": deleted_count},
-            message=f"成功删除 {deleted_count} 个菜谱"
-        )
-    except BaseBusinessException as e:
-        return response_error(message=e.message)
+

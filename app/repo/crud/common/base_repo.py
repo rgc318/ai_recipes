@@ -479,8 +479,9 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             view_mode: str = ViewMode.ACTIVE,  # <-- 【新增】接收 view_mode
             eager_loads: Optional[List[Any]] = None,
             stmt_in: Optional[Any] = None,  # 1. 【关键修复】在这里添加 stmt_in 参数
-            sort_map: Optional[Dict[str, Any]] = None
-    ) -> PageResponse[ModelType]:
+            sort_map: Optional[Dict[str, Any]] = None,
+            return_scalars: bool = True
+    ) -> PageResponse[Any]:
         """
         【全新】通用的、支持动态过滤和排序的分页查询方法。
         这将是所有 Repo 的分页查询入口。
@@ -516,7 +517,12 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
 
         # 7. 执行查询并返回结果
         items_result = await self.db.execute(stmt)
-        items = items_result.unique().all()
+        if return_scalars:
+            # 默认行为：返回 ORM 对象列表
+            items = items_result.unique().scalars().all()
+        else:
+            # 高级行为：返回完整的 Row 对象列表
+            items = items_result.unique().all()
 
         return PageResponse(
             items=items,
