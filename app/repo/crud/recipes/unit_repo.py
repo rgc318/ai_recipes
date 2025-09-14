@@ -48,7 +48,8 @@ class UnitRepository(BaseRepository[Unit, UnitCreate, UnitUpdate]):
             sort_by=sort_by,
             view_mode=view_mode,
             stmt_in=stmt,  # 传入预处理过的 statement
-            sort_map={'ingredient_count': ingredient_count_col}
+            sort_map={'ingredient_count': ingredient_count_col},
+            return_scalars=False
         )
 
         # 3. 父类返回的是 (ORM, count) 元组，我们需要将其处理成 DTO

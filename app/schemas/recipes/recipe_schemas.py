@@ -156,6 +156,7 @@ class RecipeRead(RecipeBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    is_deleted: bool = Field(False, description="是否已被软删除")  # <-- 【新增】
     tags: List[TagRead] = []
     ingredients: List[RecipeIngredientRead] = []
 
@@ -176,7 +177,7 @@ class RecipeSummaryRead(RecipeBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
-
+    is_deleted: bool = Field(False, description="是否已被软删除")  # <-- 【新增】
     # 列表页通常需要封面、标签和分类用于展示和筛选
     cover_image: Optional[FileRecordRead] = None
     tags: List[TagRead] = []
@@ -187,3 +188,7 @@ class RecipeSummaryRead(RecipeBase):
 class RecipeFilterParams(BaseModel):
     title: Optional[str] = Field(None, description="按菜谱标题进行模糊搜索")
     description: Optional[str] = Field(None, description="按菜谱描述进行模糊搜索")
+
+class BatchDeleteRecipesPayload(BaseModel): # <-- 【新增】
+    """用于批量操作菜谱的请求体。"""
+    recipe_ids: List[UUID]

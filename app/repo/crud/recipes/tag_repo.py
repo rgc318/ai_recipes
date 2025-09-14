@@ -203,7 +203,8 @@ class TagRepository(BaseRepository[Tag, TagCreate, TagUpdate]):
             sort_by=sort_by,
             view_mode=view_mode,
             stmt_in=stmt,
-            sort_map={'recipe_count': recipe_count_col}
+            sort_map={'recipe_count': recipe_count_col},
+            return_scalars=False
         )
 
         # 3. 处理基类返回的元组列表

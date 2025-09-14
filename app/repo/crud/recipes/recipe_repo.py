@@ -3,11 +3,12 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import delete, select, insert, update
+from sqlalchemy import delete, select, insert, update, union_all
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.exceptions import NotFoundException
+from app.enums.query_enums import ViewMode
 from app.models.common.category_model import RecipeCategoryLink, Category
 from app.models.files.file_record import FileRecord
 from app.repo.crud.common.base_repo import BaseRepository, PageResponse
@@ -34,9 +35,9 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
     # 核心查询方法
     # ==========================
 
-    async def get_by_id_with_details(self, recipe_id: UUID) -> Optional[Recipe]:
+    async def get_by_id_with_details(self, recipe_id: UUID, view_mode: str = ViewMode.ACTIVE) -> Optional[Recipe]:
         stmt = (
-            self._base_stmt()
+            self._base_stmt(view_mode=view_mode)
             .where(self.model.id == recipe_id)
             .options(
                 joinedload(Recipe.cover_image),
@@ -112,16 +113,12 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
         )
 
         # 5. [核心] 在 Repo 层内部完成数据处理和转换
-        processed_items = []
-        for item_row in paged_response.items:
-            # 从 Row 对象 (单元素元组) 中，只取出第一个元素，也就是 Recipe ORM 对象
-            recipe_orm = item_row[0]
+        #    现在 paged_response.items 就是 List[Recipe]，可以直接遍历
+        processed_items = [
+            RecipeSummaryRead.model_validate(orm_obj) for orm_obj in paged_response.items
+        ]
 
-            # 现在，用这个干净的 recipe_orm 对象来进行验证
-            recipe_dto = RecipeSummaryRead.model_validate(recipe_orm)
-            processed_items.append(recipe_dto)
-
-        # 6. 将处理好的 DTO 列表赋值回去
+        # 6. 将处理好的 DTO 列表赋值回 paged_response 对象
         paged_response.items = processed_items
 
         return paged_response
@@ -389,3 +386,40 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
 
         # 3. 执行语句
         await self.db.execute(stmt)
+
+    async def get_all_associated_file_records(self, recipe_ids: list[UUID]) -> list[FileRecord]:
+        """獲取一批菜譜關聯的所有文件記錄（封面、圖庫、步驟圖）。"""
+        if not recipe_ids:
+            return []
+
+        # 1. 查找封面圖的 ID
+        cover_images_stmt = select(Recipe.cover_image_id).where(
+            Recipe.id.in_(recipe_ids),
+            Recipe.cover_image_id.is_not(None)
+        )
+
+        # 2. 查找圖庫圖片的 ID
+        gallery_images_stmt = select(RecipeGalleryLink.file_id).where(
+            RecipeGalleryLink.recipe_id.in_(recipe_ids)
+        )
+
+        # 3. 查找步驟圖的 ID
+        steps_subquery = select(RecipeStep.id).where(RecipeStep.recipe_id.in_(recipe_ids)).subquery()
+        step_images_stmt = select(RecipeStepImageLink.file_id).where(
+            RecipeStepImageLink.step_id.in_(select(steps_subquery))
+        )
+
+        # 4. 【核心修改】使用 UNION ALL 合併所有文件 ID，並去重
+        #    現在每個子查詢都只 select 一個 ID 欄位
+        all_file_ids_stmt = select(union_all(
+            cover_images_stmt,
+            gallery_images_stmt,
+            step_images_stmt
+        ).alias("all_ids")).distinct()
+
+        # 5. 一次性獲取所有 FileRecord 物件
+        #    現在 all_file_ids_stmt 這個子查詢只返回一列，符合 IN 的語法
+        final_query = select(FileRecord).where(FileRecord.id.in_(all_file_ids_stmt))
+
+        result = await self.db.execute(final_query)
+        return result.scalars().all()
