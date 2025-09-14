@@ -80,6 +80,15 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
                     .distinct()
                 )
 
+        if "category_ids__in" in filters:
+            category_ids = filters.pop("category_ids__in")
+            if category_ids:
+                stmt = (
+                    stmt.join(RecipeCategoryLink)
+                    .where(RecipeCategoryLink.category_id.in_(category_ids))
+                    .distinct()
+                )
+
         # 按食材ID列表过滤
         if "ingredient_ids__in" in filters:
             ingredient_ids = filters.pop("ingredient_ids__in")

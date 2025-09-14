@@ -239,7 +239,7 @@ async def list_recipes_paginated(
     sort: Optional[str] = Query("-created_at", description="排序字段"),
     filter_params: RecipeFilterParams = Depends(),
     view_mode: ViewMode = Query(ViewMode.ACTIVE, description="查看模式"),
-    category_id: Optional[UUID] = Query(None, description="根据分类ID精确过滤"),
+    category_ids: Optional[List[UUID]] = Query(None, description="根据分类ID列表过滤"),
     tag_ids: Optional[List[UUID]] = Query(None, description="根据关联的标签ID列表过滤"),
     # ingredient_ids: Optional[List[UUID]] = Query(None, description="根据关联的食材ID列表过滤"), # 如果需要也可以加上
     current_user: Optional[UserContext] = Depends(get_current_user), # 列表页可匿名访问
@@ -256,8 +256,8 @@ async def list_recipes_paginated(
         filters["title__ilike"] = filters.pop("title")
     if "description" in filters:
         filters["description__ilike"] = filters.pop("description")
-    if category_id:
-        filters["category_id__eq"] = category_id
+    if category_ids:
+        filters["category_ids__in"] = category_ids
     if tag_ids:
         filters["tag_ids__in"] = tag_ids
 
