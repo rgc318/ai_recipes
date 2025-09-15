@@ -1,6 +1,7 @@
 # app/services/recipe_service.py
+import asyncio
 import os
-from typing import Dict, Any, List, Union, Optional, TYPE_CHECKING
+from typing import Dict, Any, List, Union, Optional, TYPE_CHECKING, Set
 from uuid import UUID
 
 from fastapi import Depends
@@ -215,11 +216,40 @@ class RecipeService(BaseService):
         if current_user:
             recipe_policy.can_list(current_user, Recipe)
 
+        # ▼▼▼ 【核心修改】将 pop 操作分解，以帮助静态分析器理解 ▼▼▼
+
+        # 1. 先用 .get() 安全地获取值，这不会修改字典
+        category_ids_to_expand = filters.get("category_ids__in")
+
+        # 2. 从字典中移除这个键，确保它不会被传递给下一层
+        if "category_ids__in" in filters:
+            del filters["category_ids__in"]
+
+        # 后续逻辑与之前完全相同
+        if category_ids_to_expand:
+            tasks = [
+                self.category_repo.get_self_and_descendants_cte(cat_id)
+                for cat_id in category_ids_to_expand
+            ]
+
+            results_list = await asyncio.gather(*tasks)
+
+            all_target_category_ids: Set[UUID] = set()
+            for category_list in results_list:
+                for category in category_list:
+                    all_target_category_ids.add(category.id)
+
+            if all_target_category_ids:
+                # 将处理好的最终结果 "放回" filters 字典
+                filters["category_ids__in"] = list(all_target_category_ids)
+            else:
+                return PageResponse(items=[], total=0, page=page, per_page=per_page, total_pages=0)
+
         return await self.recipe_repo.get_paged_recipes(
             page=page,
             per_page=per_page,
             sort_by=sort_by,
-            filters=filters or {},
+            filters=filters,
             view_mode=view_mode
         )
 

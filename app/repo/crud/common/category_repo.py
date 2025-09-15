@@ -205,3 +205,32 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
         )
         result = await self.db.execute(stmt)
         return result.rowcount
+
+    async def get_self_and_descendants_cte(self, category_id: UUID) -> List[Category]:
+        """
+        【新版本】使用递归CTE获取一个分类自身及其所有后代。
+        """
+        # 定义递归查询的初始部分（种子）
+        category_cte = (
+            select(self.model)
+            .where(self.model.id == category_id)
+            .cte(name="category_cte", recursive=True)
+        )
+
+        # 定义递归部分
+        cte_alias = category_cte.alias()
+        model_alias = self.model.__table__.alias()
+
+        category_cte = category_cte.union_all(
+            select(model_alias).where(
+                model_alias.c.parent_id == cte_alias.c.id
+            )
+        )
+
+        # 【修改】执行最终查询，这次不再排除自身
+        stmt = select(self.model).join(
+            category_cte, self.model.id == category_cte.c.id
+        )
+
+        result = await self.db.execute(stmt)
+        return result.scalars().all()

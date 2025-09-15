@@ -1,6 +1,6 @@
 # app/models/recipes/category_model.py
 from typing import List, Optional, TYPE_CHECKING
-import uuid
+from uuid import UUID
 
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 # 菜谱与分类的多对多关联表
 class RecipeCategoryLink(BaseModel, table=True):
-    recipe_id: uuid.UUID = Field(foreign_key="recipe.id", primary_key=True)
-    category_id: uuid.UUID = Field(foreign_key="category.id", primary_key=True)
+    recipe_id: UUID = Field(foreign_key="recipe.id", primary_key=True)
+    category_id: UUID = Field(foreign_key="category.id", primary_key=True)
 
     __table_args__ = (
         UniqueConstraint("recipe_id", "category_id", name="uq_recipe_category"),
@@ -30,7 +30,7 @@ class Category(BaseModel, table=True):
 
     # --- 用于实现层级关系 ---
 
-    parent_id: Optional[uuid.UUID] = Field(default=None, foreign_key="category.id")
+    parent_id: Optional[UUID] = Field(default=None, foreign_key="category.id")
 
     # '多对一' 的关系 (你的修复方案，非常正确)
     parent: Optional["Category"] = Relationship(
@@ -49,3 +49,14 @@ class Category(BaseModel, table=True):
     )
 
     recipes: List["Recipe"] = Relationship(back_populates="categories", link_model=RecipeCategoryLink)
+
+def get_descendant_ids(category_id: UUID, all_categories: list[Category]) -> set[UUID]:
+    """
+    递归地从一个扁平的分类列表中找到一个分类的所有后代ID。
+    注意：需要你的 all_categories 列表包含 parent_id 资讯。
+    """
+    descendants = {category_id}  # 包含自身
+    children = [cat.id for cat in all_categories if cat.parent_id == category_id]
+    for child_id in children:
+        descendants.update(get_descendant_ids(child_id, all_categories))
+    return descendants
