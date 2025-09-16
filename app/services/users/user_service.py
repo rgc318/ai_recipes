@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, timezone
 from uuid import UUID
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
@@ -8,7 +9,8 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import settings
 from app.core.exceptions import UserNotFoundException, NotFoundException, AlreadyExistsException, \
-    ConcurrencyConflictException, UnauthorizedException
+    ConcurrencyConflictException, UnauthorizedException, PermissionDeniedException
+from app.enums.query_enums import ViewMode
 from app.models.files.file_record import FileRecord
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.infra.db.repository_factory_auto import RepositoryFactory
@@ -103,6 +105,7 @@ class UserService(BaseService):
             per_page: int = 10,
             sort_by: Optional[List[str]] = None,
             filters: Optional[Dict[str, Any]] = None,
+            view_mode: str = ViewMode.ACTIVE,
     ) -> PageResponse[UserReadWithRoles]:
         """
         获取用户分页列表。
@@ -116,6 +119,7 @@ class UserService(BaseService):
             per_page=per_page,
             sort_by=sort_by,
             filters=filters or {},
+            view_mode=view_mode
         )
 
         # 2. 【核心业务逻辑】对从数据层获取的原始数据进行处理和丰富
@@ -173,7 +177,7 @@ class UserService(BaseService):
         permanent_path: Optional[str] = None
         temp_path: Optional[str] = None
 
-        try:
+        async with self.user_repo.db.begin_nested():
             # 【核心修改】在这里调整对象创建流程
 
             # 1. 在内存中创建 User 对象实例，此时它是一个“瞬态对象”
@@ -219,11 +223,7 @@ class UserService(BaseService):
                     commit=False  # 【重要】确保它加入我们的大事务
                 )
 
-            await self.user_repo.commit()
-        except Exception as e:
-            # 发生任何错误，回滚事务
-            await self.user_repo.rollback()
-            raise e
+
 
         # --- 阶段二: 外部非事务性操作 ---
         # 只有在数据库事务成功后才执行
@@ -244,89 +244,85 @@ class UserService(BaseService):
         await self.user_repo.refresh(new_user)
         return new_user
 
-
     async def update_user(self, user_id: UUID, updates: UserUpdate) -> User:
         """
         一个功能完备且具备事务原子性的用户更新方法。
         """
-        # 1. 【读取】开启一个事务，并获取"实时"的user ORM对象
-        #    get_user_with_roles 确保了 user.roles 已被预加载
         user_to_update = await self.get_user_with_roles(user_id)
-
-        # 2. 【数据准备】将传入的Pydantic模型转为字典，只包含需要更新的字段
         update_data = updates.model_dump(exclude_unset=True)
 
-        # 3. 【业务校验】在提交前完成所有校验
-        # 检查邮箱唯一性
+        # 业务校验（这部分可以在事务外，也可以在事务内，事务外更好）
         new_email = update_data.get("email")
         if new_email and new_email != user_to_update.email:
-            if await self.user_repo.get_by_email(new_email):
+            if await self.user_repo.exists_by_field(new_email, "email"):  # 使用更高效的 exists_by_field
                 raise AlreadyExistsException("邮箱已被注册")
 
         new_phone = update_data.get("phone")
         if new_phone and new_phone != user_to_update.phone:
-            if await self.user_repo.get_by_phone(new_phone):
+            if await self.user_repo.exists_by_field(new_phone, "phone"):  # 使用更高效的 exists_by_field
                 raise AlreadyExistsException("该手机号已被注册")
 
-        # 4. 【内存中修改】分离并处理特殊字段
-        # 处理密码
-        if "password" in update_data and update_data["password"]:
-            new_password = update_data.pop("password")
-            user_to_update.hashed_password = get_password_hash(new_password)
-
-        # 处理角色
-        if "role_ids" in update_data:
-            role_ids = update_data.pop("role_ids")
-            # 如果 role_ids 是一个有效列表，则更新用户的角色
-            if role_ids is not None:
-                # 1. 获取 Role 对象列表
-                roles = []
-                unique_role_ids = list(set(role_ids))
-                if unique_role_ids:
-                    roles = await self.role_repo.get_by_ids_with_permissions(unique_role_ids)
-                    if len(roles) != len(unique_role_ids):
-                        raise NotFoundException("一个或多个角色不存在")
-                    # 2. 直接在内存中修改 user.roles 属性
-                    #    这正是 user_repo.set_user_roles 所做的事情
-                    user_to_update.roles = roles
-
-        # 5. 【内存中修改】使用通用的update方法更新剩下的常规字段
-        if update_data:
-            # 这个update方法现在只在内存中修改user_to_update对象的属性
-            await self.user_repo.update(user_to_update, update_data)
-
         try:
-            # 6. 【写入】一次性提交所有在内存中所做的修改
-            await self.user_repo.commit()
-            # 刷新对象以获取数据库生成的最新状态（如updated_at）
-            await self.user_repo.refresh(user_to_update)
+            # 【核心修正】将所有修改操作放入事务块中
+            async with self.user_repo.db.begin_nested():
+                # 4. 【内存中修改】分离并处理特殊字段
+                if "password" in update_data and update_data["password"]:
+                    new_password = update_data.pop("password")
+                    user_to_update.hashed_password = get_password_hash(new_password)
+
+                if "role_ids" in update_data:
+                    role_ids = update_data.pop("role_ids")
+                    if role_ids is not None:
+                        roles = []
+                        unique_role_ids = list(set(role_ids))
+                        if unique_role_ids:
+                            roles = await self.role_repo.get_by_ids(unique_role_ids)  # 建议使用不带 permission 的 get_by_ids
+                            if len(roles) != len(unique_role_ids):
+                                raise NotFoundException("一个或多个角色不存在")
+                        user_to_update.roles = roles
+
+                # 5. 【内存中修改】使用通用的update方法更新剩下的常规字段
+                if update_data:
+                    await self.user_repo.update(user_to_update, update_data)
+
         except StaleDataError:
-            await self.user_repo.rollback()
+            # 【核心修正】保留对并发冲突异常的捕获
             raise ConcurrencyConflictException("操作失败，数据已被他人修改，请刷新后重试")
         except Exception as e:
-            await self.user_repo.rollback()
+            # 其他异常由全局处理器处理，这里只管抛出
+            self.logger.error(f"更新用户失败: {e}")
             raise e
 
-        return user_to_update
+        # refresh 操作应该在事务成功后执行
+        complete_user = await self.user_repo.get_by_id_with_roles_permissions(user_id)
+        if not complete_user:
+            # 这是一个理论上的边缘情况，但做好防御
+            raise UserNotFoundException("Failed to reload user after update.")
 
-
+        return complete_user
 
     async def delete_user(self, user_id: UUID) -> bool:
-        user = await self.get_user_by_id(user_id)
+        # 【核心修改】在检查用户是否存在时，使用 view_mode='all' 来查找所有用户
+        user = await self.user_repo.get_by_id(user_id, view_mode=ViewMode.ALL.value)
         if not user:
+            # 如果在所有用户中都找不到，才真正抛出异常
             raise UserNotFoundException()
 
-        try:
-            # 1. 先清理关联的角色
-            await self.user_repo.clear_roles_by_user_ids([user_id])
+        # 【可选】你甚至可以增加一个检查，防止重复删除
+        if user.is_deleted:
+            # 如果用户已经在回收站了，可以直接返回成功，或者抛出一个 spécifiques 错误
+            self.logger.info(f"用户 {user.username} 已在回收站中，无需重复删除。")
+            return  True
 
-            await self.user_repo.soft_delete(user)
-            await self.user_repo.commit()
-            return True
+        try:
+            async with self.user_repo.db.begin_nested():
+                await self.user_repo.clear_roles_by_user_ids([user_id])
+                await self.user_repo.soft_delete_by_ids([user_id])
+                return True
         except Exception as e:
             self.logger.error(f"删除用户失败：{e}")
-            await self.user_repo.rollback()
             return False
+            raise e
 
     async def batch_delete_users(self, user_ids: List[UUID], current_user: UserContext) -> int:
         """
@@ -345,39 +341,34 @@ class UserService(BaseService):
                     raise UnauthorizedException(f"权限不足，无法删除超级管理员用户: {user.username}")
 
         # 3. 执行数据库操作
-        try:
+        async with self.user_repo.db.begin_nested():
             await self.user_repo.clear_roles_by_user_ids(user_ids)
             # 调用我们在 Repository 中创建的新方法
             deleted_count = await self.user_repo.soft_delete_by_ids(user_ids)
-            await self.user_repo.commit()
-            return deleted_count
-        except Exception as e:
-            self.logger.error(f"批量删除用户失败：{e}")
-            await self.user_repo.rollback()
-            raise e
+
+        return deleted_count
+
 
     async def lock_user(self, user_id: UUID) -> None:
-        """
-        锁定一个用户账户。
-        【风格优化】使用公共的 repo 方法。
-        """
-        # 先校验用户是否存在，这是一个好习惯
-        await self.get_user_by_id(user_id)
+        """锁定一个用户账户。"""
+        await self.get_user_by_id(user_id)  # 校验用户存在
 
-        # 这是一个独立的业务事务
         try:
-            # 使用 update_by_id，这是一个公开且高效的方法
-            rows_affected = await self.user_repo.update_by_id(
-                user_id,
-                {"is_locked": True}
-            )
+            # async with self.user_repo.db.begin(): # 开启一个自动事务块
+            # SQLAlchemy < 2.0 or different setup might be:
+            async with self.user_repo.db.begin_nested() if self.user_repo.db.is_active else self.user_repo.db.begin() as transaction:
+                rows_affected = await self.user_repo.update_by_id(
+                    user_id,
+                    {"is_locked": True}
+                )
             if rows_affected == 0:
-                # 理论上 get_user_by_id 已经检查过，但这是一个更深层次的保险
+                # 即使 get_user_by_id 检查过，这也能防止在极小的竞争条件下用户被删除
                 raise UserNotFoundException()
-
-            await self.user_repo.commit()
+            # 退出 'with' 块时，如果没异常就自动 commit 了
         except Exception as e:
-            await self.user_repo.rollback()
+            # 这里甚至可以不需要 rollback 调用，因为 with 块会自动处理
+            # 只需要记录日志并重新抛出即可
+            self.logger.error(f"Failed to lock user {user_id}: {e}")
             raise e
 
     # --- 用户与角色的关联管理 ---
@@ -392,13 +383,11 @@ class UserService(BaseService):
         if role in user.roles:
             return user
 
-        try:
+        async with self.user_repo.db.begin_nested():
             updated_user = await self.user_repo.assign_role_to_user(user, role)
-            await self.user_repo.commit()  # <--- 必须添加 commit
-            return updated_user
-        except Exception as e:
-            await self.user_repo.rollback()  # <--- 必须添加 rollback
-            raise e
+
+        return updated_user
+
 
     async def revoke_role_from_user(self, user_id: UUID, role_id: UUID) -> User:
         """从用户中撤销一个角色。"""
@@ -407,13 +396,11 @@ class UserService(BaseService):
         if not role:
             raise NotFoundException("角色不存在")
 
-        try:
+        async with self.user_repo.db.begin_nested():
             revoke_user = await self.user_repo.revoke_role_from_user(user, role)
-            await self.user_repo.commit()
-            return revoke_user
-        except Exception as e:
-            await self.user_repo.rollback()  # <--- 必须添加 rollback
-            raise e
+
+        return revoke_user
+
 
 
     async def set_user_roles(self, user_id: UUID, role_ids: List[UUID], pre_fetched_user: User = None) -> User:
@@ -430,64 +417,53 @@ class UserService(BaseService):
 
 
 
-        try:
+        async with self.user_repo.db.begin_nested():
             # 调用 repo 层方法，该方法不 commit
             updated_user = await self.user_repo.set_user_roles(user, roles)
-            await self.user_repo.commit()
+
             await self.user_repo.refresh(updated_user)
-            return updated_user
-        except Exception as e:
-            await self.user_repo.rollback()
-            raise e
+        return updated_user
+
 
     # 【新增】一个专门给用户更新自己信息的方法
     async def update_profile(self, user_id: UUID, updates: UserUpdateProfile) -> User:
         """用户更新自己的个人资料，也需要在一个事务中完成。"""
-        # 1. 同样先获取用户对象，以支持乐观锁
         user = await self.get_user_by_id(user_id)
-
-        # 2. 业务校验
         update_data = updates.model_dump(exclude_unset=True)
+
         new_email = update_data.get("email")
         if new_email and new_email != user.email:
-            if await self.user_repo.get_by_email(new_email):
+            if await self.user_repo.exists_by_field(new_email, "email"):
                 raise AlreadyExistsException("邮箱已被注册")
 
-        # 3. 在内存中更新
-        await self.user_repo.update(user, update_data)
-
         try:
-            # 4. 统一提交
-            await self.user_repo.commit()
-            await self.user_repo.refresh(user)
+            # 【核心修正】将 update 操作移入事务块
+            async with self.user_repo.db.begin_nested():
+                await self.user_repo.update(user, update_data)
+
         except StaleDataError:
-            await self.user_repo.rollback()
+            # 【核心修正】保留并发冲突检查
             raise ConcurrencyConflictException("保存失败，您的个人资料可能已被系统更新，请刷新页面")
         except Exception as e:
-            await self.user_repo.rollback()
+            self.logger.error(f"更新个人资料失败: {e}")
             raise e
 
+        await self.user_repo.refresh(user)
         return user
 
     async def change_password(self, user_id: UUID, new_plain_password: str) -> None:
-        """
-        为一个指定用户修改密码。这是一个独立的业务事务。
-        """
-        # Service层负责业务逻辑：密码必须经过哈希
         hashed_password = get_password_hash(new_plain_password)
         try:
-            # Service层负责调用Repo层的基础操作
-            rows_affected = await self.user_repo.update_by_id(
-                user_id,
-                {"hashed_password": hashed_password}
-            )
-            if rows_affected == 0:
-                raise UserNotFoundException()  # 如果没有行被更新，说明用户不存在
-
-            # Service层负责提交事务
-            await self.user_repo.commit()
+            async with self.user_repo.db.begin_nested():
+                rows_affected = await self.user_repo.update_by_id(
+                    user_id,
+                    {"hashed_password": hashed_password}
+                )
+                if rows_affected == 0:
+                    raise UserNotFoundException()
         except Exception as e:
-            await self.user_repo.rollback()
+            # 记录日志并重新抛出，让上层处理
+            self.logger.error(f"Failed to change password for user {user_id}: {e}")
             raise e
 
     async def change_password_with_verification(
@@ -527,30 +503,24 @@ class UserService(BaseService):
         # 先校验用户是否存在，这是一个好习惯
         await self.get_user_by_id(user_id)
 
-        try:
+        async with self.user_repo.db.begin_nested():
             rows_affected = await self.user_repo.update_by_id(
                 user_id,
                 {"is_active": is_active}
             )
-            await self.user_repo.commit()
-            return rows_affected > 0
-        except Exception as e:
-            await self.user_repo.rollback()
-            raise e
+
+        return rows_affected > 0
+
 
     async def update_last_login(self, user_id: UUID) -> None:
         """
         更新用户最后登录时间。这是一个独立的业务事务。
         """
-        try:
+        async with self.user_repo.db.begin_nested():
             await self.user_repo.update_by_id(
                 user_id,
                 {"last_login_at": datetime.now(timezone.utc)}
             )
-            await self.user_repo.commit()
-        except Exception as e:
-            await self.user_repo.rollback()
-            raise e
 
     async def record_failed_login(self, user_id: UUID) -> None:
         """
@@ -569,13 +539,10 @@ class UserService(BaseService):
             update_data["is_locked"] = True
             self.logger.warning(f"用户 {user.username} 因登录失败次数过多而被锁定。")
 
-        try:
+        async with self.user_repo.db.begin_nested():
             # 使用高效的 update_by_id 一次性更新所有字段
             await self.user_repo.update_by_id(user.id, update_data)
-            await self.user_repo.commit()
-        except Exception as e:
-            await self.user_repo.rollback()
-            raise e
+
 
     async def record_successful_login(self, user_id: UUID) -> None:
         """
@@ -586,88 +553,67 @@ class UserService(BaseService):
             "login_attempts": 0,
             "last_login_at": datetime.now(timezone.utc)
         }
-        try:
+        async with self.user_repo.db.begin_nested():
             await self.user_repo.update_by_id(user_id, update_data)
-            await self.user_repo.commit()
-        except Exception as e:
-            await self.user_repo.rollback()
-            raise e
 
 
     async def update_avatar(self, user_id: UUID, upload_file: UploadFile) -> User:
-        """
-        原子化地更新用户头像。
-
-        此方法执行以下操作：
-        1. 获取用户信息，为删除旧头像做准备。
-        2. 调用 FileService 上传新头像。
-        3. 如果存在旧头像，则删除对象存储中的旧文件和数据库中的旧记录。
-        4. 创建新头像的 FileRecord 记录。
-        5. 更新 User 表中的 avatar_url 字段。
-        6. 所有数据库操作都在一个事务中完成。
-        """
-        # 1. 在事务开始前，先获取当前用户信息
         user = await self.user_repo.get_by_id(user_id)
         if not user:
             raise UserNotFoundException()
 
-        old_avatar_name = user.avatar_url
-
-        # 【关键修改】在这里将 upload_result 初始化为 None
+        old_avatar_object_name = user.avatar_url
         upload_result = None
 
-        # --- 开始事务性操作 ---
+        # --- 阶段一: 上传新文件到云存储 (外部操作) ---
         try:
-            # 2. 上传新文件（这个操作在事务之外，因为它不涉及我们自己的数据库）
-            # 您已有的 upload_user_avatar 方法已能胜任
             upload_result = await self.file_service.upload_user_avatar(
-                file=upload_file,
-                user_id=str(user_id)  # 路径参数
+                file=upload_file, user_id=str(user_id)
             )
+        except Exception as e:
+            self.logger.error(f"Avatar upload failed for user {user_id}: {e}")
+            raise
 
-            # 3. 如果存在旧头像，执行清理
-            if old_avatar_name:
-                # 3.1 删除旧的物理文件
-                await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
+        # --- 阶段二: 数据库事务 ---
+        try:
+            async with self.user_repo.db.begin_nested():  # 使用自动事务块
+                # 1. (软)删除旧的 FileRecord
+                if old_avatar_object_name:
+                    await self._cleanup_old_avatar_records(old_avatar_object_name)
 
-                # 3.2 (软)删除旧的 FileRecord
-                # 这里我们通过 repo 直接操作，以便纳入事务控制
-                file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
-                await file_record_repo.soft_delete_by_object_name(old_avatar_name)
+                # 2. 创建新的 FileRecord
+                await self.file_record_service.register_uploaded_file(
+                    object_name=upload_result.object_name,
+                    original_filename=upload_file.filename,
+                    file_size=upload_result.file_size,
+                    content_type=upload_result.content_type,
+                    profile_name="user_avatars",
+                    uploader_context=UserContext(id=user_id),  # 假设可以这样构建
+                    etag=upload_result.etag,
+                    commit=False  # 确保加入大事务
+                )
 
-            # 4. 创建新的 FileRecord
-            file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
-            await file_record_repo.create(FileRecordCreate(
-                object_name=upload_result.object_name,
-                original_filename=upload_file.filename,
-                file_size=upload_result.file_size,
-                content_type=upload_result.content_type,
-                uploader_id=user_id,
-                profile_name="user_avatars",
-                etag=upload_result.etag
-            ))
-
-            # 5. 更新 User 对象，并将其加入会话
-            user.avatar_url = upload_result.object_name
-            self.user_repo.db.add(user)  # 将修改后的 user 对象添加到会话中
-
-            # 6. 提交事务！
-            # 所有数据库操作 (删除旧FileRecord, 创建新FileRecord, 更新User) 将被一次性提交
-            await self.user_repo.commit()
+                # 3. 更新 User 对象
+                user.avatar_url = upload_result.object_name
+                self.user_repo.db.add(user)
 
         except Exception as e:
-            # 如果任何一步失败，回滚所有数据库操作
-            await self.user_repo.rollback()
-            self.logger.error(f"Failed to update avatar for user {user_id}: {e}")
-            # 这里可以根据情况，尝试删除刚刚上传的新文件，以避免产生孤儿文件
-            if upload_result:
-                await self.file_service.delete_file(upload_result.object_name, profile_name="user_avatars")
-            raise e  # 重新抛出异常，让上层处理
+            self.logger.error(f"Failed to update avatar DB records for user {user_id}: {e}")
+            # 尝试清理刚刚上传的新文件，避免产生孤儿文件
+            await self.file_service.delete_file(upload_result.object_name, profile_name="user_avatars")
+            raise e
 
-        # 刷新 user 对象以获取最新数据（如 updated_at）并返回
+        # --- 阶段三: 事务成功后，清理旧的物理文件 (外部清理) ---
+        if old_avatar_object_name:
+            try:
+                await self.file_service.delete_file(old_avatar_object_name, profile_name="user_avatars")
+            except Exception as e:
+                self.logger.error(
+                    f"CRITICAL: DB updated for user {user_id}, "
+                    f"but failed to delete old avatar file {old_avatar_object_name}. Error: {e}"
+                )
+
         await self.user_repo.refresh(user)
-        # 别忘了动态填充完整的 URL
-        # return self._set_full_avatar_url(user)
         return user
 
     async def _cleanup_old_avatar_records(self, old_avatar_object_name: str):
@@ -683,10 +629,9 @@ class UserService(BaseService):
 
     async def link_new_avatar(self, user_id: UUID, avatar_dto: AvatarLinkDTO, user_context: UserContext) -> User:
         """
-        原子化地关联一个已通过预签名URL上传的头像。
-        这个方法不处理文件上传，只处理数据库事务。
+        原子化地关联一个已通过预签名URL上传的头像（使用 begin_nested 优化）。
         """
-        # 1. 获取用户信息，和之前完全一样
+        # 1. 获取用户信息，这部分逻辑在事务之外，完全不变
         user = await self.user_repo.get_by_id(user_id)
         if not user:
             raise UserNotFoundException()
@@ -696,72 +641,104 @@ class UserService(BaseService):
 
         if old_avatar_name == new_avatar_name:
             self.logger.info(f"Avatar for user {user_id} is already set to {new_avatar_name}. No action taken.")
-            # 刷新并返回当前的用户状态
             await self.user_repo.refresh(user)
             return user
 
-        # --- 事务性操作 ---
         try:
-            # 2. 【安全校验】确认文件确实已上传到对象存储
-            # 这是重要的一步，防止客户端伪造请求
-            # if not await self.file_service.file_exists(new_avatar_name, profile_name="user_avatars"):
-            #     raise NotFoundException("指定的上传文件不存在或尚未完成上传。")
+            # 2. 【核心修改】开启一个自动管理的事务块
+            async with self.user_repo.db.begin_nested():
+                # 所有数据库相关的操作都放在这个代码块里
+                new_file_record = await self.file_record_service.register_uploaded_file(
+                    object_name=avatar_dto.object_name,
+                    original_filename=avatar_dto.original_filename,
+                    content_type=avatar_dto.content_type,
+                    file_size=avatar_dto.file_size,
+                    profile_name="user_avatars",
+                    uploader_context=user_context,
+                    etag=avatar_dto.etag,
+                    commit=False
+                )
 
+                await self._cleanup_old_avatar_records(old_avatar_name)
 
-            new_file_record = await self.file_record_service.register_uploaded_file(
-                object_name=avatar_dto.object_name,
-                original_filename=avatar_dto.original_filename,
-                content_type=avatar_dto.content_type,
-                file_size=avatar_dto.file_size,
-                profile_name="user_avatars",  # 明确业务场景
-                uploader_context=user_context,
-                etag=avatar_dto.etag,
-                commit=False
-            )
-            # 3. 如果存在旧头像，执行清理（和之前完全一样）
-            await self._cleanup_old_avatar_records(old_avatar_name)
+                user.avatar_url = new_file_record.object_name
+                self.user_repo.db.add(user)
 
-            # 4. 创建新的 FileRecord（数据源从UploadFile变为DTO）
-            # file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
-            # await file_record_repo.create(FileRecordCreate(
-            #     object_name=new_avatar_name,
-            #     original_filename=avatar_dto.original_filename,
-            #     file_size=avatar_dto.file_size,
-            #     content_type=avatar_dto.content_type,
-            #     uploader_id=user_id,
-            #     profile_name="user_avatars",
-            #     etag=avatar_dto.etag
-            # ))
-
-            # 5. 更新 User 对象（和之前完全一样）
-            user.avatar_url = new_file_record.object_name
-            self.user_repo.db.add(user)
-
-            # 6. 提交事务（和之前完全一样）
-            await self.user_repo.commit()
+                # 3. 【核心修改】不再需要手动 commit()
+                # 当代码块无异常结束时，事务会自动提交
 
         except Exception as e:
-            # 回滚逻辑也完全一样
-            await self.user_repo.rollback()
-            # 注意：这里我们不需要删除新上传的文件，因为如果关联失败，
-            # 用户可以简单地重试这一步，而无需重新上传。
-            # 如果重试也失败，可以后续通过一个清理任务来处理。
+            # 4. 【核心修改】不再需要手动 rollback()
+            # 如果 async with 块内部发生异常，事务会自动回滚
+            # 这里只剩下记录日志和重新抛出异常的职责
+            self.logger.error(f"Failed to link new avatar for user {user_id}: {e}")
             raise e
 
-        # --- 阶段二: 外部非事务性操作 ---
-        # 只有在上面的数据库事务完全成功后，才会执行到这里。
+        # 5. 阶段二的外部非事务性操作，完全不变
         if old_avatar_name:
             try:
-                # 现在才去删除云存储上的物理文件
                 await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
             except Exception as e:
-                # 如果这里失败了，最坏的情况是留下了一个孤儿文件，这是可以接受的。
-                # 记录日志，以便后续通过定时任务清理。
                 self.logger.error(f"数据库更新成功，但删除旧的物理头像文件 {old_avatar_name} 失败: {e}")
 
-        # 刷新并返回结果（和之前完全一样）
         await self.user_repo.refresh(user)
-        # return self._set_full_avatar_url(user)
         return user
 
+    async def restore_users(self, user_ids: List[UUID], current_user: UserContext) -> int:
+        """
+        从回收站中批量恢复用户。
+        """
+        # 在这里可以添加权限检查，例如只有超级管理员才能恢复
+        # user_policy.can_restore(current_user)
 
+        # 调用 BaseRepository 提供的通用恢复方法
+        restored_count = await self.user_repo.restore_by_ids(user_ids)
+        if restored_count > 0:
+            self.logger.info(f"User {current_user.username} restored {restored_count} users.")
+        return restored_count
+
+    async def deactivate_and_anonymize_users(self, user_ids: List[UUID], current_user: UserContext) -> int:
+        """
+        永久停用并匿名化用户账户，替代物理删除。
+        """
+        # 权限检查：确保操作者是超级管理员，并且不能停用自己
+        if not current_user.is_superuser:
+            raise PermissionDeniedException("只有超级管理员才能执行此操作")
+        if current_user.id in user_ids:
+            raise UnauthorizedException("不能永久停用自己的账户")
+
+        # 1. 开启一个事务
+        async with self.user_repo.db.begin_nested():
+            # 2. 从回收站中获取用户
+            users_to_deactivate = await self.user_repo.get_by_ids(user_ids, view_mode=ViewMode.DELETED.value)
+            if len(users_to_deactivate) != len(set(user_ids)):
+                raise NotFoundException("一个或多个要操作的用户不存在于回收站中")
+
+            # 3. 逐个匿名化用户信息
+            count = 0
+            for user in users_to_deactivate:
+                if user.is_superuser:
+                    raise PermissionDeniedException(f"不能永久停用超级管理员账户: {user.username}")
+
+                # 抹去个人敏感信息
+                user.username = f"deleted_user_{user.id.hex[:8]}"  # 使用部分hex确保唯一性
+                user.email = f"{user.id}@deleted.local"
+                user.full_name = "已注销用户"
+                user.phone = None
+                user.avatar_url = None  # 头像的物理文件可在后续清理
+                user.hashed_password = get_password_hash(f"locked-{uuid.uuid4()}")  # 设置一个随机且无法登录的密码
+
+                # 锁定账户并标记为非活跃
+                user.is_active = False
+                user.is_locked = True
+
+                self.user_repo.db.add(user)
+                count += 1
+
+        # 4. 事务会自动提交
+        self.logger.info(f"User {current_user.username} permanently deactivated {count} users.")
+
+        # 注意：这里我们没有清理物理头像文件。
+        # 这是一个可以接受的策略，因为文件记录已被软删除，
+        # 后续可以通过一个定时清理任务来处理这些“孤儿”文件。
+        return count

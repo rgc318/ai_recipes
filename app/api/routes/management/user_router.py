@@ -4,8 +4,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query, UploadFile, File
 from app.config.config_settings.config_loader import logger
 from app.api.dependencies.permissions import require_superuser
-from app.core.exceptions import UnauthorizedException, BaseBusinessException
+from app.core.exceptions import UnauthorizedException, BaseBusinessException, PermissionDeniedException
 from app.core.security.security import get_current_user
+from app.enums.query_enums import ViewMode
 from app.schemas.file.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
     PresignedPolicyRequest
 from app.schemas.users.user_context import UserContext
@@ -21,6 +22,38 @@ from app.enums.response_codes import ResponseCodeEnum
 
 router = APIRouter()
 
+
+# 【新增】批量恢复用户
+@router.post(
+    "/restore",
+    summary="[管理员] 批量恢复用户",
+    response_model=StandardResponse[dict],
+    dependencies=[Depends(require_superuser)]
+)
+async def restore_users(
+    payload: BatchDeletePayload,
+    service: UserService = Depends(get_user_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """从回收站中批量恢复用户。"""
+    restored_count = await service.restore_users(payload.user_ids, current_user)
+    return response_success(data={"restored_count": restored_count}, message=f"成功恢复 {restored_count} 个用户")
+
+# 【新增】永久停用用户
+@router.delete(
+    "/permanent-deactivation",
+    summary="[管理员] 批量永久停用用户",
+    response_model=StandardResponse[dict],
+    dependencies=[Depends(require_superuser)]
+)
+async def permanent_deactivate_users(
+    payload: BatchDeletePayload,
+    service: UserService = Depends(get_user_service),
+    current_user: UserContext = Depends(get_current_user),
+):
+    """永久停用并匿名化用户账户。这是一个不可逆操作。"""
+    deactivated_count = await service.deactivate_and_anonymize_users(payload.user_ids, current_user)
+    return response_success(data={"deactivated_count": deactivated_count}, message=f"成功永久停用 {deactivated_count} 个用户")
 
 @router.get(
     "/info",
@@ -247,6 +280,7 @@ async def admin_link_user_avatar(
     summary="动态分页、排序和过滤用户列表"
 )
 async def list_users_paginated(
+        current_user: UserContext = Depends(get_current_user),
         service: UserService = Depends(get_user_service),
         page: int = Query(1, ge=1, description="页码"),
         # 保持与后端 service/repo 一致的命名
@@ -260,7 +294,8 @@ async def list_users_paginated(
         # 3. 使用 Depends 将所有过滤参数自动注入到 filter_params 对象中
         filter_params: UserFilterParams = Depends(),
 
-        role_ids: Optional[List[UUID]] = Query(None, description="根据关联的角色ID列表过滤")
+        role_ids: Optional[List[UUID]] = Query(None, description="根据关联的角色ID列表过滤"),
+        view_mode: ViewMode = Query(ViewMode.ACTIVE, description="查看模式: active, all, deleted"), # <-- 新增
 
 ):
     """
@@ -269,6 +304,10 @@ async def list_users_paginated(
     - **排序**: `?sort=-created_at,username`
     - **过滤**: `?username=admin&is_active=true&role_ids=uuid1&role_ids=uuid2`
     """
+
+    if view_mode != ViewMode.ACTIVE and not current_user.is_superuser:
+        raise PermissionDeniedException(message="只有超级管理员才能查看非活跃用户列表")
+
     # 4. 在 Router 层进行简单的数据格式转换
     # 将逗号分隔的字符串转为列表，如果存在的话
     sort_by = sort.split(',') if sort else None
@@ -293,7 +332,8 @@ async def list_users_paginated(
         page=page,
         per_page=per_page,
         sort_by=sort_by,
-        filters=filters
+        filters=filters,
+        view_mode=view_mode
     )
 
     return response_success(data=page_data, message="获取用户列表成功")

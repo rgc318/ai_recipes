@@ -78,6 +78,7 @@ class UserRead(BaseModel):
     is_superuser: bool
     is_verified: bool
     is_locked: bool  # <-- 建议在Read模型也加上，以便前端展示
+    is_deleted: bool
     created_at: datetime
     updated_at: datetime
     last_login_at: Optional[datetime] = Field(None, description="上次登录时间")

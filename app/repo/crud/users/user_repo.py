@@ -1,10 +1,11 @@
 from typing import Optional, List
 from uuid import UUID
-from sqlalchemy import delete
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import EmailStr
 from sqlalchemy.orm import selectinload
 
+from app.enums.query_enums import ViewMode
 from app.models.users.user import User, Role, UserRole
 from app.schemas.users.user_schemas import UserCreate, UserUpdate
 from app.schemas.common.page_schemas import PageResponse
@@ -40,9 +41,62 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             .options(selectinload(self.model.roles).selectinload(Role.permissions))
         )
         result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        return result.unique().scalar_one_or_none()
 
+    async def find_by_username_or_email(self, identifier: str) -> Optional[User]:
+        """
+        根据用户名或邮箱查找用户。
+        """
+        stmt = self._base_stmt().where(
+            or_(
+                self.model.username == identifier,
+                self.model.email == identifier
+            )
+        )
+        return await self._run_and_scalar(stmt, "find_by_username_or_email")
 
+    async def exists_by_field(self, value: str, field_name: str) -> bool:
+        """
+        检查指定字段的某个值是否存在（不区分大小写）。
+        """
+        column = getattr(self.model, field_name)
+        # 构建一个只查询主键的、限制为1条的高效存在性检查语句
+        exists_stmt = select(self.model.id).where(column.ilike(value)).limit(1)
+        # 使用 select(exists(...)) 结构，数据库会将其优化为非常快的查询
+        stmt = select(select(exists_stmt).label("exists"))
+
+        result = await self.db.execute(stmt)
+        return result.scalar() is True
+
+    async def batch_update_status(self, user_ids: List[UUID], updates: dict) -> int:
+        """
+        根据用户ID列表，批量更新用户信息（如 is_active, is_locked）。
+        """
+        if not user_ids or not updates:
+            return 0
+
+        # 只允许更新特定安全相关的字段
+        allowed_fields = {'is_active', 'is_locked'}
+        update_data = {k: v for k, v in updates.items() if k in allowed_fields}
+
+        if not update_data:
+            return 0
+
+        stmt = (
+            update(self.model)
+            .where(self.model.id.in_(user_ids))
+            .values(**update_data)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount
+
+    async def get_superusers(self) -> List[User]:
+        """
+        获取所有被标记为超级管理员的用户。
+        """
+        stmt = self._base_stmt().where(self.model.is_superuser == True)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
     # --- 【新增】高级分页和过滤方法 ---
     # async def get_paged_users(
     #         self,
@@ -224,6 +278,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             per_page: int,
             filters: dict,
             sort_by: List[str],
+            view_mode: str = ViewMode.ACTIVE,
     ) -> PageResponse[User]:
         """
         获取用户分页列表。
@@ -231,7 +286,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         然后调用通用的父类方法完成查询。
         """
         # 1. 开始一个基础查询语句
-        stmt = self._base_stmt()
+        stmt = select(self.model)
 
         # 2. 【预处理】处理 User 特有的过滤逻辑
         if 'role_ids__in' in filters:
@@ -253,6 +308,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             filters=filters,  # 此处 filters 已被处理过，不包含 role_ids__in
             sort_by=sort_by,
             eager_loads=eager_loading_options,
-            stmt_in=stmt  # 传入我们已经附加了 JOIN 的查询语句
+            stmt_in=stmt,  # 传入我们已经附加了 JOIN 的查询语句
+            view_mode=view_mode,
         )
     # =================================================================
