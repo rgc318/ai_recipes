@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Set, List
 from uuid import UUID
 
-from sqlalchemy import Column, Integer, DateTime
+from sqlalchemy import Column, Integer, DateTime, UniqueConstraint, text, Index
 from sqlmodel import Field, Relationship
 
 from app.enums.auth_method import AuthMethod
@@ -16,13 +16,17 @@ class UserRole(BaseModel, table=True):
     user_id: UUID = Field(foreign_key="user.id", primary_key=True)
     role_id: UUID = Field(foreign_key="role.id", primary_key=True)
 
+    __table_args__ = (
+        UniqueConstraint("user_id", "role_id", name="uq_user_role_user_id_role_id"),
+    )
+
 class RolePermission(BaseModel, table=True):
     role_id: UUID = Field(foreign_key="role.id", primary_key=True)
     permission_id: UUID = Field(foreign_key="permission.id", primary_key=True)
 
 class Role(BaseModel, table=True):
     # 【新增】code 字段，作为系统内部唯一、不可变的标识符
-    code: str = Field(..., unique=True, index=True, description="角色的唯一代码，系统内部使用，不可变")
+    code: str = Field(..., index=True, description="角色的唯一代码，系统内部使用，不可变")
     # name 字段现在作为可随时修改的、对用户友好的显示名称
     name: str = Field(..., description="角色的显示名称，人类可读，可修改")
     description: Optional[str] = None
@@ -30,6 +34,15 @@ class Role(BaseModel, table=True):
     users: List["User"] = Relationship(back_populates="roles", link_model=UserRole)
     permissions: List["Permission"] = Relationship(back_populates="roles", link_model=RolePermission)
 
+
+    __table_args__ = (
+        Index(
+            "ix_role_code_active_unique",
+            "code",
+            unique=True,
+            postgresql_where=(Column("is_deleted") == False)
+        ),
+    )
 
 class Permission(BaseModel, table=True):
     # 【新增】code 字段，作为系统内部唯一、不可变的标识符

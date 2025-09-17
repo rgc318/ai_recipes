@@ -1,16 +1,20 @@
+from collections import Counter
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.users.user import Role
+from app.repo.crud.users.user_repo import UserRepository
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.users.role_schemas import RoleCreate, RoleUpdate, RoleReadWithPermissions
 from app.repo.crud.users.role_repo import RoleRepository
 from app.repo.crud.users.permission_repo import PermissionRepository
-from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
+from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException, \
+    BaseBusinessException
 from app.services._base_service import BaseService
 from app.config.config_settings.config_loader import logger
 
@@ -24,21 +28,23 @@ class RoleService(BaseService):
     def __init__(self, repo_factory: RepositoryFactory):
         super().__init__()
         self.factory = repo_factory
-        self.role_repo: RoleRepository = self.factory.role
-        self.permission_repo: PermissionRepository = self.factory.permission
+        self.role_repo: RoleRepository = repo_factory.get_repo_by_type(RoleRepository)
+        self.permission_repo: PermissionRepository = repo_factory.get_repo_by_type(PermissionRepository)
+        self.user_repo: UserRepository = repo_factory.get_repo_by_type(UserRepository)
+
 
         # --- 基础角色查询 ---
 
-    async def get_role_by_id(self, role_id: UUID) -> Role:
+    async def get_role_by_id(self, role_id: UUID, view_mode: str = ViewMode.ACTIVE) -> Role:
         """根据ID获取角色，未找到则抛出业务异常。"""
-        role = await self.role_repo.get_by_id(role_id)
+        role = await self.role_repo.get_by_id(role_id, view_mode=view_mode)
         if not role:
             raise NotFoundException("角色不存在")
         return role
 
-    async def get_role_with_permissions(self, role_id: UUID) -> Role:
+    async def get_role_with_permissions(self, role_id: UUID, view_mode: str = ViewMode.ACTIVE) -> Role:
         """获取角色及其关联的所有权限。"""
-        role = await self.role_repo.get_by_id_with_permissions(role_id)
+        role = await self.role_repo.get_by_id_with_permissions(role_id, view_mode=view_mode)
         if not role:
             raise NotFoundException("角色不存在")
         return role
@@ -57,6 +63,7 @@ class RoleService(BaseService):
             per_page: int = 10,
             sort_by: Optional[List[str]] = None,
             filters: Optional[Dict[str, Any]] = None,
+            view_mode: str = ViewMode.ACTIVE,  # <-- 【新增】view_mode 参数
     ) -> PageResponse[RoleReadWithPermissions]:
         """
         获取角色分页列表，支持动态过滤和排序。
@@ -85,6 +92,7 @@ class RoleService(BaseService):
             sort_by=sort_by,
             filters=repo_filters,
             eager_loads=eager_loading_options,  # 传入预加载选项
+            view_mode=view_mode
         )
 
         logger.info("获取角色分页列表，结果：{}".format(paged_roles_orm))
@@ -107,125 +115,73 @@ class RoleService(BaseService):
         return await self.role_repo.list(skip=skip, limit=limit)
 
     async def create_role(self, role_in: RoleCreate) -> Role:
-        """
-        创建一个新角色，并原子化地关联其权限。
-        """
-        # 1. 【业务校验】检查角色代码是否已存在
-        if await self.role_repo.get_by_code(role_in.code):
-            raise AlreadyExistsException(f"角色代码 '{role_in.code}' 已存在。")
+        """创建一个新角色，并原子化地关联其权限。"""
 
-        # 2. 【数据准备】将权限ID和角色的基础数据分开
-        permission_ids = role_in.permission_ids
-        # 使用 Pydantic 的 model_dump 方法，排除掉关联ID
-        role_data_dict = role_in.model_dump(exclude={"permission_ids"})
 
-        # --- 开始事务性操作 ---
-        try:
-            # 3. 【关联处理】获取所有待关联的 Permission ORM 对象
+        permission_ids = role_in.permission_ids or []
+
+        new_role_obj = None
+        async with self.role_repo.db.begin_nested():
+            if await self.role_repo.get_by_code(role_in.code):
+                raise AlreadyExistsException(f"角色代码 '{role_in.code}' 已存在。")
+            # 1. 【数据准备】获取所有待关联的 Permission ORM 对象
             permissions_to_assign = []
             if permission_ids:
-                # 去重并校验所有权限ID的有效性
                 unique_ids = list(set(permission_ids))
                 permissions_to_assign = await self.permission_repo.get_by_ids(unique_ids)
                 if len(permissions_to_assign) != len(unique_ids):
                     raise NotFoundException("一个或多个指定的权限不存在。")
 
-            # 4. 【内存中创建】先在内存中创建 Role 对象实例
+            # 2. 【内存中创建】先在内存中创建 Role 对象实例
+            role_data_dict = role_in.model_dump(exclude={"permission_ids"})
             new_role_obj = Role(**role_data_dict)
 
-            # 5. 【内存中关联】如果存在要关联的权限，直接赋值给 a.permissions 属性
+            # 3. 【内存中关联】将 Permission 对象列表直接赋值给新实例的 .permissions 属性
             if permissions_to_assign:
                 new_role_obj.permissions = permissions_to_assign
 
-            # 6. 【写入】将构造完整的 Role 对象添加到数据库会话中
-            #    注意：这里我们没有调用 repo.create，而是直接操作 session，
-            #    因为 repo.create 是一个更通用的方法，而这里我们需要更精细的控制。
+            # 4. 【写入】将这个构造完整的对象一次性添加到 session 中
             self.role_repo.db.add(new_role_obj)
 
-            # 7. 【提交】一次性提交所有操作
-            await self.role_repo.commit()
+            # 5. 【获取ID】我们需要 flush 来让 new_role_obj 获得数据库生成的 ID
+            await self.role_repo.flush()
 
-            # 8. 刷新对象以获取数据库生成的默认值（如id, created_at）
-            await self.role_repo.refresh(new_role_obj)
+        # 6. 【返回完整对象】使用 get 方法返回一个包含了所有预加载关系的“干净”对象
+        return await self.get_role_with_permissions(new_role_obj.id)
 
-            return new_role_obj
-        except Exception as e:
-            # 发生任何错误，回滚事务
-            await self.role_repo.rollback()
-            raise e
     async def update_role(self, role_id: UUID, updates: RoleUpdate) -> Role:
-        """
-        【全新强化版】更新角色信息，包括其关联的权限。
-        具备事务原子性和完整的并发控制。
-        """
-        # 1. 【读取】在事务开始前，获取需要被更新的、带有最新版本号的 Role 对象
-        #    get_role_with_permissions 确保了 role.permissions 已被预加载
         role_to_update = await self.get_role_with_permissions(role_id)
-
-        # 2. 【数据准备】将传入的 Pydantic 模型转为字典，只包含需要更新的字段
         update_data = updates.model_dump(exclude_unset=True)
 
-        # --- 开始事务性操作 ---
+        new_code = update_data.get("code")
+        if new_code and new_code != role_to_update.code:
+            existing_role = await self.role_repo.get_by_code(new_code)
+            if existing_role and existing_role.id != role_id:
+                raise AlreadyExistsException(f"角色代码 '{new_code}' 已被其他角色使用。")
+
         try:
-            # 3. 【业务校验】在提交前，完成所有业务规则的校验
-            # 检查角色代码唯一性
-            new_code = update_data.get("code")
-            if new_code and new_code != role_to_update.code:
-                existing_role = await self.role_repo.get_by_code(new_code)
-                if existing_role and existing_role.id != role_id:
-                    raise AlreadyExistsException(f"角色代码 '{new_code}' 已被其他角色使用。")
-
-            # 4. 【内存中修改】分离并处理需要特殊操作的字段 (权限)
-            if "permission_ids" in update_data:
-                permission_ids = update_data.pop("permission_ids")
-
-                # 只有当 permission_ids 是一个有效列表时才进行处理
-                # (允许传入 null 或 [] 来清空权限)
-                if permission_ids is not None:
-                    permissions_to_set = []
-                    unique_ids = list(set(permission_ids))
-                    if unique_ids:
-                        # 校验所有权限ID的有效性
-                        permissions_to_set = await self.permission_repo.get_by_ids(unique_ids)
-                        if len(permissions_to_set) != len(unique_ids):
+            async with self.role_repo.db.begin_nested():
+                if "permission_ids" in update_data:
+                    permission_ids = update_data.pop("permission_ids")
+                    if permission_ids is not None:
+                        if permission_ids and not await self.permission_repo.are_ids_valid(permission_ids):
                             raise NotFoundException("一个或多个指定的权限不存在。")
+                        await self.role_repo.set_role_permissions_by_ids(role_to_update, permission_ids)
 
-                    # 直接在内存中修改 role 对象的 a.permissions 属性
-                    # 这得益于我们之前预加载了权限，不会触发额外的数据库查询
-                    role_to_update.permissions = permissions_to_set
-
-            # 5. 【内存中修改】使用通用的 update 方法更新剩下的常规字段
-            #    注意：这个 update 方法只修改内存中的对象属性，并将其加入会话
-            if update_data:
-                await self.role_repo.update(role_to_update, update_data)
-
-            # 6. 【写入】一次性提交所有在内存中所做的修改
-            #    所有操作（基础信息更新、权限关联变更）将作为一个原子操作被提交
-            await self.role_repo.commit()
-
-            # 7. 刷新对象以获取数据库生成的最新状态（如 updated_at 和新版本号）
-            await self.role_repo.refresh(role_to_update)
-
+                if update_data:
+                    await self.role_repo.update(role_to_update, update_data)
         except StaleDataError:
-            # 只有在 commit 阶段才会真正检查版本号，如果冲突则抛出 StaleDataError
-            await self.role_repo.rollback()
             raise ConcurrencyConflictException("操作失败，角色信息已被他人修改，请刷新后重试。")
         except Exception as e:
-            # 捕获其他所有异常并回滚
-            await self.role_repo.rollback()
             raise e
 
-        return role_to_update
+        return await self.get_role_with_permissions(role_id)
 
-    async def delete_role(self, role_id: UUID) -> None:
+    async def soft_delete_role(self, role_id: UUID) -> None:
         """软删除一个角色。"""
         role = await self.get_role_by_id(role_id)
-        try:
+        async with self.role_repo.db.begin_nested():
             await self.role_repo.soft_delete(role)
-            await self.role_repo.commit()
-        except Exception as e:
-            await self.role_repo.rollback()
-            raise e
 
     # --- 角色与权限的关联管理 ---
 
@@ -296,3 +252,127 @@ class RoleService(BaseService):
         except Exception as e:
             await self.role_repo.rollback()
             raise e
+
+    async def soft_delete_roles(self, role_ids: List[UUID]) -> int:
+        """批量软删除角色，带有前置安全检查。"""
+        if not role_ids:
+            return 0
+
+        async with self.role_repo.db.begin_nested():
+            # 【核心新增】从 permanent_delete_roles 中复制安全检查逻辑
+            roles_in_use = await self.role_repo.get_roles_assigned_to_users(role_ids)
+            if roles_in_use:
+                role_names = ", ".join([role.name for role in roles_in_use])
+                raise BaseBusinessException(  # 确保导入 BusinessException
+                    message=f"无法删除角色 '{role_names}'，因为它们仍被分配给用户。"
+                )
+
+            # 只有在检查通过后，才执行软删除
+            deleted_count = await self.role_repo.soft_delete_by_ids(role_ids)
+
+        return deleted_count
+
+    async def restore_roles(self, role_ids: List[UUID]) -> int:
+        """批量恢复软删除的角色，带有双重冲突检查。"""
+        if not role_ids:
+            return 0
+
+        unique_role_ids = list(set(role_ids))
+
+        async with self.role_repo.db.begin_nested():
+            # 1. 获取所有待恢复的角色
+            roles_to_restore = await self.role_repo.get_by_ids(unique_role_ids, view_mode=ViewMode.DELETED)
+            if len(roles_to_restore) != len(unique_role_ids):
+                raise NotFoundException("一个或多个要恢复的角色不存在于回收站中。")
+
+            # 2. 【核心修正】双重冲突检查
+            codes_to_restore = [role.code for role in roles_to_restore]
+
+            # 检查点 A: 待恢复的列表内部是否存在 code 冲突
+            code_counts = Counter(codes_to_restore)
+            internal_conflicts = [code for code, count in code_counts.items() if count > 1]
+            if internal_conflicts:
+                raise BaseBusinessException(
+                    message=f"恢复失败！你选择的数据中包含重复的代码: {', '.join(internal_conflicts)}。一次只能恢复一个。"
+                )
+
+            # 检查点 B: 待恢复的角色是否与已存在的活跃角色冲突
+            if codes_to_restore:
+                conflicting_active_roles = await self.role_repo.find_active_roles_by_codes(codes_to_restore)
+                if conflicting_active_roles:
+                    conflicting_codes = ", ".join([role.code for role in conflicting_active_roles])
+                    raise BaseBusinessException(
+                        message=f"恢复失败！代码为 '{conflicting_codes}' 的角色已存在于活跃列表中。"
+                    )
+
+            # 3. 如果所有检查都通过，才执行恢复操作
+            restored_count = await self.role_repo.restore_by_ids(unique_role_ids)
+
+        return restored_count
+
+    async def permanent_delete_roles(self, role_ids: List[UUID]) -> int:
+        """批量永久删除角色，带有前置安全检查。"""
+        if not role_ids:
+            return 0
+
+        deleted_count = 0
+        async with self.role_repo.db.begin_nested():
+            # 1. 核心安全检查：角色是否仍被使用
+            roles_in_use = await self.role_repo.get_roles_assigned_to_users(role_ids)
+            if roles_in_use:
+                role_names = ", ".join([role.name for role in roles_in_use])
+                raise BaseBusinessException(
+                    message=f"无法删除角色 '{role_names}'，因为它们仍被分配给用户。"
+                )
+
+            # 2. 清理关联的权限
+            await self.role_repo.clear_permissions_by_role_ids(role_ids)
+
+            # 3. 执行物理删除
+            deleted_count = await self.role_repo.hard_delete_by_ids(role_ids)
+
+        return deleted_count
+
+    async def merge_roles(self, source_role_ids: List[UUID], destination_role_id: UUID) -> Role:
+        """
+        将多个源角色合并到一个目标角色，借鉴 Tag 模块的实现。
+        """
+        unique_source_ids = list(set(source_role_ids))
+        if not unique_source_ids:
+            raise BaseBusinessException(message="必须提供至少一个源角色。")
+        if destination_role_id in unique_source_ids:
+            raise BaseBusinessException(message="目标角色不能是被合并的源角色之一。")
+
+        async with self.role_repo.db.begin_nested():
+            # 1. 验证所有ID都有效，并获取完整的 Role 对象（预加载权限）
+            all_ids = unique_source_ids + [destination_role_id]
+            # 【修正】使用 get_by_ids_with_permissions 获取带权限的对象
+            roles_to_process = await self.role_repo.get_by_ids_with_permissions(all_ids)
+            if len(roles_to_process) != len(all_ids):
+                raise NotFoundException("一个或多个指定的角色ID不存在。")
+
+            source_roles = [r for r in roles_to_process if r.id in unique_source_ids]
+            destination_role = next(r for r in roles_to_process if r.id == destination_role_id)
+
+            # 2. 【新增】合并权限的逻辑
+            all_permission_ids = {p.id for p in destination_role.permissions}  # 目标角色原有权限
+            for role in source_roles:
+                all_permission_ids.update(p.id for p in role.permissions)  # 添加源角色的权限
+
+            # 使用我们强大的 repo 方法，为目标角色设置合并后的权限全集
+            await self.role_repo.set_role_permissions_by_ids(destination_role, list(all_permission_ids))
+
+            # 3. 找到所有需要重新映射的用户
+            user_ids_to_remap = await self.role_repo.get_user_ids_for_roles(unique_source_ids)
+
+            # 4. 为这些用户添加目标角色
+            if user_ids_to_remap:
+                await self.user_repo.add_roles_to_users(user_ids_to_remap, [destination_role_id])
+
+            # 5. 删除旧的 user-role 关联 (这一步现在是必须的，因为 add_roles_to_users 只添加不删除)
+            await self.role_repo.delete_links_for_roles(unique_source_ids)
+
+            # 6. 软删除源角色
+            await self.role_repo.soft_delete_by_ids(unique_source_ids)
+
+        return await self.get_role_with_permissions(destination_role_id)

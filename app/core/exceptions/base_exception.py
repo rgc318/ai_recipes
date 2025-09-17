@@ -14,7 +14,13 @@ class BaseBusinessException(Exception):
             message: Optional[str] = None,
             extra: Optional[dict] = None,
     ):
-        self.code = code if code is not None else code_enum.code
+        if code is not None:
+            self.code = code
+        elif code_enum is not None:
+            self.code = code_enum.code
+        else:
+            # 提供一个默认的、安全的备用错误码
+            self.code = ResponseCodeEnum.SERVER_ERROR.code
         self.message = message or code_enum.message
         self.status_code = status_code
         self.extra = extra or {}

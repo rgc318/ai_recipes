@@ -48,6 +48,8 @@ class RoleRead(RoleBase):
     """
     id: UUID
     created_at: Optional[datetime] = Field(None)
+    updated_at: Optional[datetime] = Field(None)
+    is_deleted: bool = Field(None)
 
     model_config = {
         "from_attributes": True
@@ -91,3 +93,11 @@ class RoleFilterParams(BaseModel):
     """
     # 保持与 permission 模块一致的通用搜索框设计
     search: Optional[str] = Field(None, description="按角色名称或代码进行模糊搜索")
+
+
+class BatchRoleActionPayload(BaseModel):
+    role_ids: List[UUID] = Field(..., description="要操作的角色ID列表")
+
+class RoleMergePayload(BaseModel):
+    source_role_ids: List[UUID] = Field(..., description="被合并的源角色ID列表")
+    destination_role_id: UUID = Field(..., description="合并的目标角色ID")
