@@ -1,4 +1,4 @@
-from typing import Any, Optional, Dict, TypeVar, Generic, List
+from typing import Any, Optional, Dict, TypeVar, Generic, List, Union
 
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -113,21 +113,28 @@ def response_success(
 
 # === 错误响应 ===
 def response_error(
-    code: ResponseCodeEnum = ResponseCodeEnum.SERVER_ERROR,
+    code: Union[ResponseCodeEnum, int] = ResponseCodeEnum.SERVER_ERROR,
     http_status: int = 200,
     message: Optional[str] = None,
     headers: Optional[Dict[str, str]] = None,
     set_cookies: Optional[List[Dict[str, Any]]] = None, # 新增 set_cookies 参数
     delete_cookies: Optional[List[str]] = None,
 ) -> JSONResponse:
-    final_message = message or code.message
-    logger.warning(f"Response Error | http_status: {http_status}, code: {code.code}, message: {final_message}")
+
+    if isinstance(code, ResponseCodeEnum):
+        code_val = code.code
+        msg_val = message if message is not None else code.message
+    else:  # 如果传入的是整数
+        code_val = code
+        msg_val = message if message is not None else "操作失败"
+
+    logger.warning(f"Response Error | http_status: {http_status}, code: {code_val}, message: {msg_val}")
 
     response = JSONResponse(
         status_code=http_status,
         content={
-            "code": code.code,
-            "message": final_message,
+            "code": code_val,
+            "message": msg_val,
             "data": None
         },
         headers=headers

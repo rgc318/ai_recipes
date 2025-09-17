@@ -662,10 +662,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         if not ids:
             return 0
 
-        update_values = {
-            "is_deleted": False,
-            "is_active": True,  # <--- 新增这一行
-        }
+        update_values = {"is_deleted": False}
         if hasattr(self.model, "deleted_at"):
             update_values["deleted_at"] = None
         if hasattr(self.model, "deleted_by"):

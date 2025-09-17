@@ -10,6 +10,7 @@ from app.models.users.user import User, Role, UserRole
 from app.schemas.users.user_schemas import UserCreate, UserUpdate
 from app.schemas.common.page_schemas import PageResponse
 from app.repo.crud.common.base_repo import BaseRepository
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
     def __init__(self, db: AsyncSession, context: Optional[dict] = None):
@@ -312,3 +313,21 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
             view_mode=view_mode,
         )
     # =================================================================
+
+    async def add_roles_to_users(self, user_ids: List[UUID], role_ids: List[UUID]):
+        """为一批用户批量添加一批角色，并忽略已存在的关联。"""
+        if not user_ids or not role_ids:
+            return
+
+        links_to_add = [
+            {"user_id": user_id, "role_id": role_id}
+            for user_id in user_ids
+            for role_id in role_ids
+        ]
+
+        if not links_to_add:
+            return
+
+        stmt = pg_insert(UserRole).values(links_to_add)
+        stmt = stmt.on_conflict_do_nothing(index_elements=['user_id', 'role_id'])
+        await self.db.execute(stmt)

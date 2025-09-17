@@ -694,6 +694,7 @@ class UserService(BaseService):
         # 调用 BaseRepository 提供的通用恢复方法
         restored_count = await self.user_repo.restore_by_ids(user_ids)
         if restored_count > 0:
+            await self.user_repo.batch_update_status(user_ids, {"is_active": True})
             self.logger.info(f"User {current_user.username} restored {restored_count} users.")
         return restored_count
 
