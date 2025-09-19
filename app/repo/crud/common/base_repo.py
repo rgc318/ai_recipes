@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime, timezone
 from math import ceil
-from sqlalchemy import asc, desc, or_, func, update
+from sqlalchemy import asc, desc, or_, func, update, exists
 import logging
 
 from app.core.logger import get_logger
@@ -597,7 +597,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
 
         return stmt
 
-    async def are_ids_valid(self, ids: List[UUID]) -> bool:
+    async def are_ids_valid(self, ids: List[UUID], view_mode: str = ViewMode.ACTIVE) -> bool:
         """
         【通用方法】高效地检查一组ID是否都存在于当前模型对应的表中。
         """
@@ -605,7 +605,8 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
             return True
 
         unique_ids = set(ids)
-        stmt = select(func.count(self.model.id)).where(self.model.id.in_(unique_ids))
+        stmt = self._base_stmt(view_mode=view_mode)
+        stmt = stmt.with_only_columns(func.count(self.model.id)).where(self.model.id.in_(unique_ids))
 
         result = await self.db.execute(stmt)
         existing_count = result.scalar_one()
@@ -675,3 +676,94 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         )
         result = await self.db.execute(stmt)
         return result.rowcount
+
+    async def soft_delete_by_filters(self, filters: Dict[str, Any]) -> int:
+        """
+        【新增】根据动态过滤条件，高效地批量软删除对象。
+        """
+        if not filters:
+            return 0
+
+        # 1. 构建基础查询，只选择 ACTIVE 的记录进行软删除
+        stmt = self._base_stmt(view_mode=ViewMode.ACTIVE)
+        # 2. 应用动态过滤
+        stmt = self._apply_dynamic_filters(stmt, filters)
+
+        # 3. 从查询中提取主键ID
+        #    注意: .with_only_columns(self.model.id) 确保只选择ID列
+        id_select_stmt = stmt.with_only_columns(self.model.id).subquery()
+
+        # 4. 构建更新语句
+        update_values = {
+            "is_deleted": True,
+            "deleted_at": datetime.now(timezone.utc)
+        }
+        if hasattr(self.model, "updated_at"):
+            update_values["updated_at"] = datetime.now(timezone.utc)
+
+        update_stmt = (
+            update(self.model)
+            .where(self.model.id.in_(select(id_select_stmt)))
+            .values(**update_values)
+        )
+
+        result = await self.db.execute(update_stmt)
+        return result.rowcount
+
+    async def hard_delete_by_filters(self, filters: Dict[str, Any]) -> int:
+        """
+        【新增】根据动态过滤条件，高效地批量物理删除对象。
+        警告：这是一个危险操作，将永久删除数据。
+        """
+        if not filters:
+            return 0
+
+        # 1. 构建基础查询 (可以删除任何状态的记录，所以用 view_mode='all')
+        stmt = self._base_stmt(view_mode=ViewMode.ALL)
+        # 2. 应用动态过滤
+        stmt = self._apply_dynamic_filters(stmt, filters)
+
+        # 3. 提取ID
+        id_select_stmt = stmt.with_only_columns(self.model.id).subquery()
+
+        # 4. 构建删除语句
+        delete_stmt = (
+            self.model.__table__.delete()
+            .where(self.model.id.in_(select(id_select_stmt)))
+        )
+
+        result = await self.db.execute(delete_stmt)
+        return result.rowcount
+
+    async def exists_by_field(
+            self,
+            value: Any,
+            field_name: str,
+            case_insensitive: bool = False,
+            view_mode: str = ViewMode.ACTIVE
+    ) -> bool:
+        """
+        【最终完美版】检查是否存在某个字段等于特定值的记录。
+        支持大小写敏感（默认）和不敏感（可选）的查询。
+        """
+        column = getattr(self.model, field_name, None)
+        if column is None:
+            self.logger.warning(f"Attempted to check existence on a non-existent field: {field_name}")
+            return False
+
+        # 基础查询语句，它会正确处理 view_mode
+        query = self._base_stmt(view_mode=view_mode)
+
+        # 【优化】直接使用已经获取的 column 变量，避免重复调用 getattr
+        if case_insensitive and isinstance(value, str):
+            # 如果要求大小写不敏感，并且值是字符串，使用 ilike
+            query = query.where(column.ilike(value))
+        else:
+            # 否则，使用精确匹配
+            query = query.where(column == value)
+
+        # 使用最高效的 exists() 结构
+        exists_stmt = select(exists(query.with_only_columns(self.model.id)))
+
+        result = await self.db.execute(exists_stmt)
+        return result.scalar_one()

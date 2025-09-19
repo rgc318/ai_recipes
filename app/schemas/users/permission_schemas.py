@@ -38,6 +38,7 @@ class PermissionRead(PermissionBase):
     包含了数据库生成的ID，并配置为可从ORM对象转换。
     """
     id: UUID
+    is_deleted: bool  # 【新增】在Read模型中包含 is_active 状态，便于前端UI展示
 
     model_config = {
         "from_attributes": True
@@ -52,6 +53,8 @@ class PermissionSyncResponse(BaseModel):
     total: int = Field(..., description="本次同步请求中包含的权限总数。")
     found: int = Field(..., description="在数据库中已存在的权限数量。")
     created: int = Field(..., description="本次同步中新创建的权限数量。")
+    disabled: int = Field(..., description="因在代码配置中被移除而被禁用的过时权限数量。")
+    enabled: int = Field(..., description="之前被禁用，本次在代码配置中恢复而重新启用的权限数量。")
 
     # 包含详细信息，便于日志记录或前端展示更丰富的反馈
     created_items: List[PermissionRead] = Field(
@@ -81,5 +84,9 @@ class PermissionSelectorRead(BaseModel):
     """
     id: UUID
     name: str
+    group: str
 
     model_config = {"from_attributes": True}
+
+class BatchPermissionActionPayload(BaseModel):
+    permission_ids: List[UUID] = Field(..., description="要操作的权限ID列表")

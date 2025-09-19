@@ -5,12 +5,14 @@ from uuid import UUID
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.config.permission_config.permissions_enum import PERMISSIONS_CONFIG
+from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.models.users.user import Permission
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.users.permission_schemas import PermissionCreate, PermissionUpdate, PermissionRead
 from app.repo.crud.users.permission_repo import PermissionRepository
-from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException
+from app.core.exceptions import NotFoundException, AlreadyExistsException, ConcurrencyConflictException, \
+    BaseBusinessException
 from app.services._base_service import BaseService
 
 logger = logging.getLogger(__name__)
@@ -31,20 +33,16 @@ class PermissionService(BaseService):
 
     # --- 核心查询方法 ---
 
-    async def get_permission_by_id(self, permission_id: UUID) -> Permission:
-        """
-        根据ID获取单个权限，未找到则抛出异常。
-        """
-        permission = await self.permission_repo.get_by_id(permission_id)
+    async def get_permission_by_id(self, permission_id: UUID, view_mode: str = ViewMode.ACTIVE) -> Permission:
+        """根据ID获取单个权限，支持指定视图模式。"""
+        permission = await self.permission_repo.get_by_id(permission_id, view_mode=view_mode)
         if not permission:
             raise NotFoundException("权限未找到")
         return permission
 
-    async def get_permission_by_code(self, code: str) -> Permission:
-        """
-        根据唯一代码获取单个权限，未找到则抛出异常。
-        """
-        permission = await self.permission_repo.get_by_code(code)
+    async def get_permission_by_code(self, code: str, view_mode: str = ViewMode.ACTIVE) -> Permission:
+        """根据唯一代码获取单个权限，支持指定视图模式。"""
+        permission = await self.permission_repo.get_by_code(code, view_mode=view_mode)
         if not permission:
             raise NotFoundException(f"代码为 '{code}' 的权限未找到")
         return permission
@@ -63,6 +61,7 @@ class PermissionService(BaseService):
             per_page: int = 10,
             sort_by: Optional[List[str]] = None,
             filters: Optional[Dict[str, Any]] = None,
+            view_mode: str = ViewMode.ACTIVE,
     ) -> PageResponse[PermissionRead]:
         """
         获取权限的分页列表，支持动态过滤和排序。
@@ -93,6 +92,7 @@ class PermissionService(BaseService):
             per_page=per_page,
             sort_by=sort_by,
             filters=repo_filters,
+            view_mode=view_mode
         )
 
         # 4. (可选) 对返回数据进行处理和转换
@@ -211,28 +211,21 @@ class PermissionService(BaseService):
     #     return result
 
     async def sync_permissions(self, permissions_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """从一个“源数据”同步权限，处理增、改、删。"""
-        try:
-            # 直接调用新的、功能强大的 repo 方法
+        """从“源数据”同步权限，处理增、改、禁用和重新启用。"""
+        async with self.permission_repo.db.begin_nested():
             result_stats = await self.permission_repo.sync_from_config(permissions_data)
-            await self.permission_repo.commit()
 
-            # 构造更详细的返回信息
-            total = len(permissions_data)
-            final_result = {
-                'total': total,
-                'created': result_stats.get('added', 0),
-                'updated': result_stats.get('updated', 0),
-                'disabled': result_stats.get('disabled', 0),
-            }
-            final_result['found'] = total - final_result['created']
+        total_in_config = len(permissions_data)
+        final_result = {
+            'total_in_config': total_in_config,
+            'created': result_stats.get('added', 0),
+            'updated': result_stats.get('updated', 0),
+            'disabled': result_stats.get('disabled', 0),
+            'enabled': result_stats.get('enabled', 0),
+        }
+        logger.info(f"权限同步完成: {final_result}")
+        return final_result
 
-            logger.info(f"权限同步完成: {final_result}")
-            return final_result
-        except Exception as e:
-            await self.permission_repo.rollback()
-            logger.error(f"同步权限失败: {e}")
-            raise
     async def sync_permissions_from_source(self) -> Dict[str, int]:
         """
         【模式二：后端中心】从后端配置文件 (permissions_enum.py) 同步权限。
@@ -242,3 +235,34 @@ class PermissionService(BaseService):
         # 这体现了代码的高度复用
         self.logger.info("Starting permission sync from backend source file...")
         return await self.sync_permissions(PERMISSIONS_CONFIG)
+
+    async def permanent_delete_permissions(self, permission_ids: List[UUID]) -> int:
+        """
+        【新增】批量永久删除权限，带有前置安全检查。
+        此功能作为清理工具，用于删除已在代码中移除且不再被任何角色使用的权限。
+        """
+        if not permission_ids:
+            return 0
+
+        deleted_count = 0
+        async with self.permission_repo.db.begin_nested():
+            # 1. 业务规则：只能永久删除那些已经被禁用的（软删除的）权限
+            perms_to_delete = await self.permission_repo.get_by_ids(permission_ids, view_mode=ViewMode.DELETED)
+            if len(perms_to_delete) != len(set(permission_ids)):
+                raise NotFoundException("一个或多个要删除的权限不存在于已禁用的权限列表中。")
+
+            # 2. 核心安全检查：权限是否仍被任何角色使用
+            perms_in_use = await self.permission_repo.get_permissions_assigned_to_roles(permission_ids)
+            if perms_in_use:
+                perm_codes = ", ".join([p.code for p in perms_in_use])
+                raise BaseBusinessException(
+                    message=f"无法删除权限 '{perm_codes}'，因为它们仍被分配给一个或多个角色。"
+                )
+
+            # 3. 清理关联关系（虽然安全检查已通过，但作为最佳实践保留）
+            await self.permission_repo.clear_roles_by_permission_ids(permission_ids)
+
+            # 4. 执行物理删除
+            deleted_count = await self.permission_repo.hard_delete_by_ids(permission_ids)
+
+        return deleted_count

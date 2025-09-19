@@ -10,7 +10,10 @@
  - 一个自动生成的、类似枚举的类，用于在后端代码中安全地引用权限代码。
  - 它消除了魔法字符串，提供了IDE自动补全，并使得重构变得简单。
 """
-
+class PermissionGroups:
+    DASHBOARD = "仪表盘"
+    USER_MANAGEMENT = "用户管理"
+    ROLE_MANAGEMENT = "角色管理"
 # ----------------------------------------------------------------
 # 步骤一：保留我们用于“同步”的原始列表
 # ----------------------------------------------------------------
@@ -18,31 +21,31 @@ PERMISSIONS_CONFIG = [
   {
     "code": "dashboard:view",
     "name": "查看仪表盘123",
-    "group": "仪表盘",
+    "group": PermissionGroups.DASHBOARD,
     "description": "允许用户查看分析页和工作台。",
   },
   {
     "code": "management:user:list",
     "name": "查看用户列表",
-    "group": "用户管理",
+    "group": PermissionGroups.USER_MANAGEMENT,
     "description": "允许用户查看用户分页列表。",
   },
   {
     "code": "management:user:create",
     "name": "创建用户",
-    "group": "用户管理",
+    "group": PermissionGroups.USER_MANAGEMENT,
     "description": "允许用户创建新用户。",
   },
   {
     "code": "management:user:update",
     "name": "编辑用户",
-    "group": "用户管理",
+    "group": PermissionGroups.USER_MANAGEMENT,
     "description": "允许用户更新现有用户信息。",
   },
   {
     "code": "management:user:delete",
     "name": "删除用户",
-    "group": "用户管理",
+    "group": PermissionGroups.USER_MANAGEMENT,
     "description": "允许用户删除用户。",
   },
   # ... 其他所有权限

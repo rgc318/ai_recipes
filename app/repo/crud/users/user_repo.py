@@ -56,18 +56,23 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         )
         return await self._run_and_scalar(stmt, "find_by_username_or_email")
 
-    async def exists_by_field(self, value: str, field_name: str) -> bool:
-        """
-        检查指定字段的某个值是否存在（不区分大小写）。
-        """
-        column = getattr(self.model, field_name)
-        # 构建一个只查询主键的、限制为1条的高效存在性检查语句
-        exists_stmt = select(self.model.id).where(column.ilike(value)).limit(1)
-        # 使用 select(exists(...)) 结构，数据库会将其优化为非常快的查询
-        stmt = select(select(exists_stmt).label("exists"))
-
-        result = await self.db.execute(stmt)
-        return result.scalar() is True
+    # async def exists_by_field(self, value: str, field_name: str) -> bool:
+    #     """
+    #     检查指定字段的某个值是否存在（不区分大小写）。
+    #     """
+    #     column = getattr(self.model, field_name)
+    #
+    #     if column is None:
+    #         # 如果提供的字段名在模型中不存在，返回 False
+    #         self.logger.warning(f"Attempted to check existence on a non-existent field: {field_name}")
+    #         return False
+    #     # 构建一个只查询主键的、限制为1条的高效存在性检查语句
+    #     exists_stmt = select(self.model.id).where(column.ilike(value)).limit(1)
+    #     # 使用 select(exists(...)) 结构，数据库会将其优化为非常快的查询
+    #     stmt = select(select(exists_stmt).label("exists"))
+    #
+    #     result = await self.db.execute(stmt)
+    #     return result.scalar() is True
 
     async def batch_update_status(self, user_ids: List[UUID], updates: dict) -> int:
         """

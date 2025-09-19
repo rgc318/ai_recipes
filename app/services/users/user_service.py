@@ -220,7 +220,6 @@ class UserService(BaseService):
                         object_name=permanent_path,
                         is_associated=True
                     ),
-                    commit=False  # 【重要】确保它加入我们的大事务
                 )
 
 
@@ -254,7 +253,7 @@ class UserService(BaseService):
         # 业务校验（这部分可以在事务外，也可以在事务内，事务外更好）
         new_email = update_data.get("email")
         if new_email and new_email != user_to_update.email:
-            if await self.user_repo.exists_by_field(new_email, "email"):  # 使用更高效的 exists_by_field
+            if await self.user_repo.exists_by_field(new_email, "email", case_insensitive= True):  # 使用更高效的 exists_by_field
                 raise AlreadyExistsException("邮箱已被注册")
 
         new_phone = update_data.get("phone")
@@ -433,7 +432,7 @@ class UserService(BaseService):
 
         new_email = update_data.get("email")
         if new_email and new_email != user.email:
-            if await self.user_repo.exists_by_field(new_email, "email"):
+            if await self.user_repo.exists_by_field(new_email, "email", case_insensitive= True):
                 raise AlreadyExistsException("邮箱已被注册")
 
         try:
@@ -590,7 +589,6 @@ class UserService(BaseService):
                     profile_name="user_avatars",
                     uploader_context=UserContext(id=user_id),  # 假设可以这样构建
                     etag=upload_result.etag,
-                    commit=False  # 确保加入大事务
                 )
 
                 # 3. 更新 User 对象
@@ -656,7 +654,6 @@ class UserService(BaseService):
                     profile_name="user_avatars",
                     uploader_context=user_context,
                     etag=avatar_dto.etag,
-                    commit=False
                 )
 
                 await self._cleanup_old_avatar_records(old_avatar_name)

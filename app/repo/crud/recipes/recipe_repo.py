@@ -3,7 +3,7 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import delete, select, insert, update, union_all
+from sqlalchemy import delete, select, insert, update, union_all, exists
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -432,3 +432,28 @@ class RecipeRepository(BaseRepository[Recipe, RecipeCreate, RecipeUpdate]):
 
         result = await self.db.execute(final_query)
         return result.scalars().all()
+
+    async def is_file_in_gallery_or_steps(self, file_id: UUID) -> bool:
+        """
+        【新增】检查一个文件ID是否被用在任何菜谱的“画廊”或“步骤”中。
+        这个方法体现了 RecipeRepository作为“菜谱领域专家”的职责。
+        """
+        # 1. 检查画廊链接表 (RecipeGalleryLink)
+        gallery_stmt = select(
+            exists().where(RecipeGalleryLink.file_id  == file_id)
+        )
+        is_in_gallery = (await self.db.execute(gallery_stmt)).scalar_one()
+        if is_in_gallery:
+            # 如果在画廊中找到了，就没必要继续检查了，直接返回 True (效率更高)
+            return True
+
+        # 2. 检查步骤图片链接表 (RecipeStepImageLink)
+        step_stmt = select(
+            exists().where(RecipeStepImageLink.file_id  == file_id)
+        )
+        is_in_steps = (await self.db.execute(step_stmt)).scalar_one()
+        if is_in_steps:
+            return True
+
+        # 3. 如果所有地方都没找到，返回 False
+        return False

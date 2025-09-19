@@ -3,17 +3,18 @@ import os
 from asyncio import Semaphore
 from datetime import datetime
 from typing import BinaryIO, List, TYPE_CHECKING, Optional
-from uuid import uuid4
+from uuid import uuid4, UUID
 
 from botocore.exceptions import ClientError
 from fastapi import UploadFile, Depends
 from starlette.concurrency import run_in_threadpool
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from app.core.exceptions import FileException
+from app.core.exceptions import FileException, NotFoundException
 from app.core.logger import logger
 from app.infra.storage.storage_factory import StorageFactory
 from app.infra.storage.storage_interface import StorageClientInterface
+from app.schemas.file.file_record_schemas import FileRecordRead
 from app.schemas.file.file_schemas import UploadResult, PresignedUploadURL, PresignedUploadPolicy
 from app.schemas.users.user_context import UserContext
 from app.services._base_service import BaseService
@@ -75,7 +76,7 @@ class FileService(BaseService):
 
         max_size_mb = getattr(profile_config, 'max_file_size_mb', 10) # 默认为 10MB
         max_size_bytes = max_size_mb * 1024 * 1024
-        if file_size > max_size_bytes * 1024 * 1024:
+        if file_size > max_size_bytes:
             raise FileException(message=f"File is too large. Max size is {max_size_mb}MB.")
 
         await file.seek(0)
@@ -260,7 +261,6 @@ class FileService(BaseService):
             profile_name=profile_name,
             uploader_context=uploader_context,
             etag=str(etag),
-            commit=True
         )
         # 5. 构建最终 URL 并返回
         return UploadResult(
@@ -280,6 +280,7 @@ class FileService(BaseService):
             content_type: str,
             original_filename: str,  # 接收原始文件名以生成安全文件名
             profile_name: str,
+            uploader_context: Optional[UserContext] = None,
             **path_params
     ) -> UploadResult:
         """
@@ -313,13 +314,20 @@ class FileService(BaseService):
                 content_type=content_type
             )
 
+        new_file_record = await self.file_record_service.register_uploaded_file(
+            object_name=object_name, original_filename=original_filename,
+            content_type=content_type, file_size=length,
+            profile_name=profile_name, uploader_context=uploader_context, etag=str(etag)
+        )
+
         # 6. 构建 URL 并返回
         return UploadResult(
             object_name=object_name,
             url=client.build_final_url(object_name),
-            etag=etag,
+            etag=str(etag),
             file_size=length,
-            content_type=content_type
+            content_type=content_type,
+            record_id=new_file_record.id
         )
 
     async def delete_file(self, object_name: str, profile_name: str):
@@ -475,7 +483,7 @@ class FileService(BaseService):
             logger.error(f"Failed to generate POST Policy for {object_name}: {e}")
             raise FileException(message="Could not generate upload policy.")
 
-    async def move_file(
+    async def move_physical_file(
             self,
             source_key: str,
             destination_key: str,
@@ -513,3 +521,4 @@ class FileService(BaseService):
         except Exception as e:
             logger.exception(f"Unexpected error during file move: {e}")
             raise FileException(message="An unexpected error occurred during file move.")
+
