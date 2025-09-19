@@ -58,8 +58,24 @@ class MinioClient(StorageClientInterface, ABC):
                 "ACL": acl
             }
         )
-        # upload_fileobj 不返回 ETag，所以可以返回空字典或固定值
-        return {}
+        logger.info(f"[MinIO Driver] Upload for {object_name} complete. Fetching metadata...")
+        try:
+            # head_object 会返回一个包含 ETag, ContentLength 等信息的字典
+            response = self.s3.head_object(
+                Bucket=self.bucket_name,
+                Key=object_name
+            )
+
+            # boto3 返回的 ETag 带有双引号，我们需要移除它们
+            etag = response.get('ETag')
+            if etag:
+                response['ETag'] = etag.strip('"')
+
+            return response
+
+        except ClientError as e:
+            logger.error(f"[MinIO Driver] Failed to fetch metadata for {object_name} after upload: {e}")
+            raise FileException("File uploaded but failed to retrieve metadata.")
 
     def remove_object(self, object_name: str):
         """底层 remove_object 方法"""

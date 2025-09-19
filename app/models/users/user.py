@@ -46,7 +46,7 @@ class Role(BaseModel, table=True):
 
 class Permission(BaseModel, table=True):
     # 【新增】code 字段，作为系统内部唯一、不可变的标识符
-    code: str = Field(..., unique=True, index=True, description="权限的唯一代码，如 'recipe:create'")
+    code: str = Field(..., index=True, description="权限的唯一代码，如 'recipe:create'")
     # name 字段现在作为可随时修改的、对用户友好的显示名称
     name: str = Field(..., description="权限的显示名称，如 '创建菜谱'")
     group: str = Field(..., description="所属模块，如 '用户管理'")
@@ -54,6 +54,15 @@ class Permission(BaseModel, table=True):
 
     roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)
 
+    # 【新增2】添加 __table_args__ 来定义部分唯一索引
+    __table_args__ = (
+        Index(
+            'ix_permission_code_active_unique',  # 索引的名称
+            'code',  # 需要索引的列
+            unique=True,  # 这是一个唯一索引
+            postgresql_where=(Column("is_deleted") == False)  # 只在 is_deleted = false 时生效
+        ),
+    )
 class User(BaseModel, table=True):
     __tablename__ = "user"
     __pydantic_model__ = UserRead

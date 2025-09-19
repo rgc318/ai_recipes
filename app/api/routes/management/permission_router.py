@@ -5,15 +5,18 @@ from fastapi import APIRouter, Depends, status, Query
 
 from app.api.dependencies.service_getters.common_service_getter import get_permission_service
 from app.api.dependencies.permissions import require_superuser  # 假设的权限依赖
+from app.core.exceptions import BaseBusinessException, NotFoundException
+from app.enums.query_enums import ViewMode
 from app.services.users.permission_service import PermissionService
 from app.schemas.users.permission_schemas import (
     PermissionCreate,
     PermissionUpdate,
     PermissionRead,
-    PermissionSyncResponse, PermissionFilterParams, PermissionSelectorRead  # 新增：用于同步结果的响应模型
+    PermissionSyncResponse, PermissionFilterParams, PermissionSelectorRead,
+    BatchPermissionActionPayload  # 新增：用于同步结果的响应模型
 )
 from app.schemas.common.page_schemas import PageResponse  # 新增：引入分页响应模型
-from app.schemas.common.api_response import response_success, StandardResponse
+from app.schemas.common.api_response import response_success, StandardResponse, response_error
 
 # 创建一个专门用于权限管理的路由器
 # 使用全局依赖来保护所有接口，这是非常好的实践
@@ -31,6 +34,42 @@ async def get_permissions_for_selector(
     """获取一个轻量级的权限列表，专门用于前端的下拉选择框。"""
     permissions = await service.get_all_permissions() # 我们需要在 Service 中添加这个方法
     return response_success(data=[PermissionSelectorRead.model_validate(p) for p in permissions])
+
+
+@router.post(
+    "/sync-from-source",
+    response_model=StandardResponse[PermissionSyncResponse],
+    summary="[管理员] 从服务器配置文件同步权限"
+)
+async def sync_permissions_from_source(
+    service: PermissionService = Depends(get_permission_service)
+):
+    """
+    【推荐】触发一次从后端代码配置到数据库的权限同步。
+    这将自动完成权限的增、改、禁用和重新启用。
+    """
+    sync_result = await service.sync_permissions_from_source()
+    return response_success(data=sync_result, message="权限已从后端源文件同步完成")
+
+
+@router.delete(
+    "/permanent",
+    response_model=StandardResponse[dict],
+    summary="[管理员] 批量永久删除权限 (清理工具)"
+)
+async def permanent_delete_permissions_batch(
+    payload: BatchPermissionActionPayload,
+    service: PermissionService = Depends(get_permission_service),
+):
+    """
+    【高危】永久删除一个或多个权限。
+    只能删除已被禁用（即在代码配置中已移除）且未被任何角色使用的权限。
+    """
+    try:
+        deleted_count = await service.permanent_delete_permissions(payload.permission_ids)
+        return response_success(data={"deleted_count": deleted_count}, message=f"成功永久清理 {deleted_count} 个过时权限")
+    except (BaseBusinessException, NotFoundException) as e:
+        return response_error(code=e.code, message=e.message)
 
 @router.post(
     "/",
@@ -71,6 +110,7 @@ async def list_permissions_paginated(
         ),
         # 3. 使用 Depends 将所有过滤参数自动注入到 filter_params 对象中
         filter_params: PermissionFilterParams = Depends(),
+        view_mode: ViewMode = Query(ViewMode.ACTIVE, description="查看模式: active, all"),
 ):
     """
     获取权限的分页列表，支持动态过滤和排序。
@@ -86,7 +126,8 @@ async def list_permissions_paginated(
         page=page,
         per_page=per_page,
         sort_by=sort_by_list,
-        filters=filters
+        filters=filters,
+        view_mode=view_mode
     )
     return response_success(data=page_data)
 
@@ -121,14 +162,15 @@ async def list_permissions_paginated(
 )
 async def get_permission_details(
     permission_id: UUID,
-    service: PermissionService = Depends(get_permission_service)
+    service: PermissionService = Depends(get_permission_service),
+    view_mode: ViewMode = Query(ViewMode.ACTIVE, description="查看模式: active, all, deleted")
 ):
     """
     根据 UUID 获取单个权限的详细信息。
 
     - **需要超级管理员权限。**
     """
-    permission = await service.get_permission_by_id(permission_id)
+    permission = await service.get_permission_by_id(permission_id, view_mode=view_mode)
     return response_success(data=PermissionRead.model_validate(permission))
 
 

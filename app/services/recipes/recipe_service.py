@@ -314,14 +314,14 @@ class RecipeService(BaseService):
                     files_to_move.append({"source": temp_path, "dest": permanent_path, "record_id": record.id})
                     # 更新数据库记录
                     await file_record_service.update_file_record(
-                        record.id, FileRecordUpdate(object_name=permanent_path, is_associated=True), commit=False
+                        record.id, FileRecordUpdate(object_name=permanent_path, is_associated=True),
                     )
             # ▲▲▲ 新增结束 ▲▲▲
             # --- 阶段二: 外部非事务性操作 ---
         if files_to_move:
             for move_op in files_to_move:
                 try:
-                    await file_service.move_file(
+                    await file_service.move_physical_file(
                         source_key=move_op["source"],
                         destination_key=move_op["dest"],
                         profile_name="recipe_images"
@@ -433,7 +433,6 @@ class RecipeService(BaseService):
                 profile_name="recipe_images",
                 uploader_context=user_context,
                 etag=file_dto.etag,
-                commit=False  # 加入我们的大事务
             )
 
             # 2. 更新菜谱记录，关联新的封面图ID
@@ -699,3 +698,41 @@ class RecipeService(BaseService):
                         f"DB records for recipes {recipe_ids} deleted, but failed to delete physical files: {object_names_to_delete}. Error: {e}")
 
         return deleted_count
+
+    async def remove_recipe_cover_image(
+            self,
+            recipe_id: UUID,
+            user_context: UserContext
+    ) -> None:
+        """
+        解除并彻底删除一个菜谱的封面图片。
+        这个方法是“解除关联”这个问题的标准解决方案。
+        """
+        # 1. 获取菜谱并检查权限
+        recipe = await self.recipe_repo.get_by_id(recipe_id)
+        if not recipe:
+            raise NotFoundException("菜谱不存在")
+
+        recipe_policy.can_update(user_context, recipe)  # 删除封面图属于更新操作
+
+        if not recipe.cover_image_id:
+            self.logger.info(f"菜谱 {recipe_id} 没有封面图片，无需操作。")
+            return
+
+        file_to_delete_id = recipe.cover_image_id
+
+        # 2. 在一个事务中，将 recipe 表中的外键设为 NULL
+        async with self.recipe_repo.db.begin_nested():
+            recipe.cover_image_id = None
+            self.recipe_repo.db.add(recipe)
+
+        # 3. 解除关联成功后，调用文件服务进行彻底删除
+        # 我们需要先获取 FileRecord 对象
+        record_to_delete = await self.file_record_service.file_repo.get_by_id_including_deleted(file_to_delete_id)
+        if record_to_delete:
+            await self.file_record_service.delete_file_and_record(
+                record=record_to_delete,
+                hard_delete_db=True
+            )
+        else:
+            self.logger.warning(f"尝试删除文件记录 {file_to_delete_id}，但未找到该记录。")

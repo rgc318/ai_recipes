@@ -1,12 +1,14 @@
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
+from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import update, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.enums.query_enums import ViewMode
 from app.repo.crud.common.base_repo import BaseRepository
-from app.models.users.user import Permission
+from app.models.users.user import Permission, RolePermission
 from app.schemas.users.permission_schemas import PermissionCreate, PermissionUpdate
 
 logger = logging.getLogger(__name__)
@@ -40,51 +42,23 @@ class PermissionRepository(BaseRepository[Permission, PermissionCreate, Permissi
 
     # --- 核心查询方法 (Core Query Methods) ---
 
-    async def get_by_code(self, code: str) -> Optional[Permission]:
-        """
-        根据权限的唯一代码获取权限。
-        这是在程序中最常用的权限查询方法。
+    async def get_by_code(self, code: str, view_mode: str = ViewMode.ACTIVE) -> Optional[Permission]:
+        """根据唯一代码获取权限，支持指定视图模式。"""
+        stmt = self._base_stmt(view_mode=view_mode).where(self.model.code == code)
+        return await self._run_and_scalar(stmt, "get_by_code")
 
-        Args:
-            code: 权限的唯一代码 (e.g., 'orders:create')。
-
-        Returns:
-            找到的 Permission 对象或 None。
-        """
-        return await self.get_one(value=code, field="code")
-
-    async def get_many_by_codes(self, codes: List[str]) -> List[Permission]:
-        """
-        根据一个代码列表，批量获取权限对象。
-        这是一个高效的查询，使用单次数据库调用代替多次循环调用。
-
-        Args:
-            codes: 一个包含权限代码的列表。
-
-        Returns:
-            找到的权限对象列表。
-        """
+    async def get_many_by_codes(self, codes: List[str], view_mode: str = ViewMode.ACTIVE) -> List[Permission]:
+        """根据代码列表批量获取权限，支持指定视图模式。"""
         if not codes:
             return []
-
-        # de-duplicate codes to avoid redundant work
         unique_codes = list(set(codes))
-
-        stmt = self._base_stmt().where(self.model.code.in_(unique_codes))
+        stmt = self._base_stmt(view_mode=view_mode).where(self.model.code.in_(unique_codes))
         return await self._run_and_scalars(stmt, "get_many_by_codes")
 
-    async def list_by_group(self, group: str) -> List[Permission]:
-        """
-        获取指定分组下的所有权限。
-        常用于在前端UI中按类别展示权限列表。
 
-        Args:
-            group: 权限的分组名称。
-
-        Returns:
-            属于该分组的权限对象列表。
-        """
-        stmt = self._base_stmt().where(self.model.group == group).order_by(self.model.name)
+    async def list_by_group(self, group: str, view_mode: str = ViewMode.ACTIVE) -> List[Permission]:
+        """获取指定分组的权限，支持指定视图模式。"""
+        stmt = self._base_stmt(view_mode=view_mode).where(self.model.group == group).order_by(self.model.name)
         return await self._run_and_scalars(stmt, "list_by_group")
 
     # --- 业务便利方法 (Business Convenience Methods) ---
@@ -164,16 +138,19 @@ class PermissionRepository(BaseRepository[Permission, PermissionCreate, Permissi
     ) -> Dict[str, int]:
         """
         根据给定的配置数据，完整地同步权限表。
-        处理新增、更新和软删除（禁用）三种情况。
+        处理新增、更新、禁用和重新启用四种情况。
         """
         if not permissions_data:
-            return {'added': 0, 'updated': 0, 'disabled': 0}
+            # 如果配置为空，则禁用所有权限
+            stmt = update(self.model).values(is_deleted=True, updated_at=datetime.now(timezone.utc))
+            res = await self.db.execute(stmt)
+            return {'added': 0, 'updated': 0, 'disabled': res.rowcount, 'enabled': 0}
 
         source_codes = {p['code'] for p in permissions_data if 'code' in p}
         source_map = {p['code']: p for p in permissions_data if 'code' in p}
 
-        # 1. 获取数据库中所有【未被删除】的权限
-        stmt = self._base_stmt()  # self._base_stmt() 会自动添加 is_deleted = false
+        # 1. 获取数据库中【所有】的权限，无论其 is_deleted 状态
+        stmt = select(self.model)
         result = await self.db.execute(stmt)
         db_permissions = result.scalars().all()
         db_map = {p.code: p for p in db_permissions}
@@ -181,53 +158,90 @@ class PermissionRepository(BaseRepository[Permission, PermissionCreate, Permissi
 
         # 2. 计算差异
         codes_to_add = source_codes - db_codes
-        codes_to_disable = db_codes - source_codes
-        codes_to_check_update = source_codes.intersection(db_codes)
+        codes_to_process = source_codes.intersection(db_codes)  # 在代码和DB中都存在的
+        codes_to_disable = db_codes - source_codes  # 只在DB中存在，代码中已移除
 
         added_count = 0
         updated_count = 0
         disabled_count = 0
+        enabled_count = 0
 
         # 3. 处理新增
         if codes_to_add:
             new_perms_data = [source_map[code] for code in codes_to_add]
-            new_objs = [self.model(**data) for data in new_perms_data]
+            new_objs = [self.model(**data, is_deleted=False) for data in new_perms_data]  # 新增时确保是活跃的
             self.db.add_all(new_objs)
-            await self.db.flush()
             added_count = len(new_objs)
             logger.info(f"权限同步：新增 {added_count} 个权限。")
 
         # 4. 处理禁用 (软删除)
         if codes_to_disable:
+            # 只禁用那些当前还是活跃的过时权限
             disable_stmt = (
                 update(self.model)
-                .where(self.model.code.in_(codes_to_disable))
+                .where(self.model.code.in_(codes_to_disable), self.model.is_deleted == False)
                 .values(is_deleted=True, updated_at=datetime.now(timezone.utc))
             )
             res = await self.db.execute(disable_stmt)
             disabled_count = res.rowcount
             logger.info(f"权限同步：禁用了 {disabled_count} 个过时的权限。")
 
-        # 5. 【修正】处理更新，增加对 group 字段的检查
-        for code in codes_to_check_update:
+        # 5. 处理更新与重新启用
+        for code in codes_to_process:
             db_perm = db_map[code]
             source_perm_data = source_map[code]
 
-            # 检查 name, description 或 group 是否有变化
+            needs_update = False
+            # 检查元数据是否有变化
             if (db_perm.name != source_perm_data.get('name') or
                     db_perm.description != source_perm_data.get('description') or
-                    db_perm.group != source_perm_data.get('group')):  # <-- 新增 group 检查
-
-                # 更新所有可能变化的元数据字段
+                    db_perm.group != source_perm_data.get('group')):
                 db_perm.name = source_perm_data.get('name', db_perm.name)
                 db_perm.description = source_perm_data.get('description', db_perm.description)
-                db_perm.group = source_perm_data.get('group', db_perm.group)  # <-- 新增 group 更新
+                db_perm.group = source_perm_data.get('group', db_perm.group)
+                needs_update = True
 
+            # 【新增逻辑】检查是否需要从禁用状态恢复为活跃状态
+            if db_perm.is_deleted:
+                db_perm.is_deleted = False
+                enabled_count += 1
+                needs_update = True
+
+            if needs_update:
                 self.db.add(db_perm)
-                updated_count += 1
+                if not db_perm.is_deleted:  # 只有元数据更新时才算 updated_count
+                    updated_count += 1
 
-        if updated_count > 0:
+        if added_count > 0 or updated_count > 0 or disabled_count > 0 or enabled_count > 0:
             await self.db.flush()
-            logger.info(f"权限同步：更新了 {updated_count} 个权限的元数据。")
 
-        return {'added': added_count, 'updated': updated_count, 'disabled': disabled_count}
+        logger.info(
+            f"权限同步完成：新增 {added_count}, 更新 {updated_count}, "
+            f"禁用 {disabled_count}, 重新启用 {enabled_count}."
+        )
+
+        return {
+            'added': added_count, 'updated': updated_count,
+            'disabled': disabled_count, 'enabled': enabled_count
+        }
+
+    async def get_permissions_assigned_to_roles(self, permission_ids: List[UUID]) -> List[Permission]:
+        """检查给定的权限ID中，哪些仍被分配给至少一个角色。"""
+        if not permission_ids:
+            return []
+        stmt = (
+            select(self.model)
+            .join(RolePermission)
+            .where(self.model.id.in_(permission_ids))
+            .distinct()
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def clear_roles_by_permission_ids(self, permission_ids: List[UUID]) -> int:
+        """根据权限ID列表，物理删除 role_permission 表中的关联记录。"""
+        if not permission_ids:
+            return 0
+        stmt = delete(RolePermission).where(RolePermission.permission_id.in_(permission_ids))
+        result = await self.db.execute(stmt)
+        return result.rowcount

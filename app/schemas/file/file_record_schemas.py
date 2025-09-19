@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field, computed_field
@@ -13,6 +13,8 @@ class FileRecordRead(BaseModel):
     id: UUID
     object_name: str = Field(..., description="文件在对象存储中的唯一路径/键")
     original_filename: str = Field(..., description="文件的原始名称")
+    description: Optional[str] = None
+    alt_text: Optional[str] = None
     file_size: int = Field(..., description="文件大小（字节）")
     content_type: str = Field(..., description="文件的 MIME 类型")
     uploader_id: UUID = Field(..., description="上传该文件的用户ID")
@@ -21,6 +23,7 @@ class FileRecordRead(BaseModel):
     # 【新增】将 profile_name 暴露给 API
     profile_name: str = Field(..., description="上传时使用的 Storage Profile 名称")
     is_associated: Optional[bool] = False
+    is_deleted: Optional[bool] = False
     # 【新增】将 etag 暴露给 API (可选)
     etag: Optional[str] = Field(None, description="文件在对象存储中的 ETag")
 
@@ -50,7 +53,8 @@ class FileRecordUpdate(BaseModel):
     original_filename: Optional[str] = None
     content_type: Optional[str] = None
     # ... 其他字段
-
+    description: Optional[str] = None
+    alt_text: Optional[str] = None
     # --- 你需要在这里添加下面这一行 ---
     object_name: Optional[str] = None
     is_associated: Optional[bool] = None
@@ -63,6 +67,8 @@ class FileRecordCreate(BaseModel):
     content_type: str
     uploader_id: UUID
     profile_name: str
+    description: Optional[str] = None
+    alt_text: Optional[str] = None
     etag: Optional[str] = None
     # is_associated: Optional[str] = False
 
@@ -75,3 +81,23 @@ class FileFilterParams(BaseModel):
     content_type: Optional[str] = Field(None, description="按文件MIME类型精确过滤")
     profile_name: Optional[str] = Field(None, description="按上传时使用的Profile名称过滤")
     uploader_id: Optional[UUID] = Field(None, description="按上传用户ID过滤")
+
+
+class StorageUsageStats(BaseModel):
+    group_key: Optional[str] = None
+    total_files: int
+    total_size_bytes: int
+
+
+class MoveFilePayload(BaseModel):
+    profile_name: str = Field(..., description="文件所在的 Profile 名称。")
+    record_id: UUID = Field(..., description="要移动的文件的数据库记录ID。")
+    destination_key: str = Field(..., description="文件在对象存储中的新路径/键。")
+
+class FileInfo(BaseModel):
+    object_name: str
+    size: int
+    last_modified: datetime
+
+class BulkActionPayload(BaseModel):
+    record_ids: List[UUID] = Field(..., min_length=1)

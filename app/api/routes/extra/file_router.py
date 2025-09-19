@@ -8,7 +8,7 @@ from app.api.dependencies.service_getters.common_service_getter import get_file_
     get_file_record_service  # 【修改】建议将依赖注入函数重命名
 from app.core.exceptions import BaseBusinessException
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
-from app.schemas.file.file_record_schemas import FileRecordRead
+from app.schemas.file.file_record_schemas import FileRecordRead, MoveFilePayload, FileInfo
 from app.schemas.file.file_schemas import (  # 导入我们为返回值定义的 Pydantic 模型
     UploadResult,
     PresignedUploadURL, RegisterFilePayload, PresignedUploadPolicy, PresignedPolicyPayload
@@ -49,12 +49,17 @@ async def upload_user_avatar(
     user_id: str = Form(..., description="用户ID"),
     file: UploadFile = File(...),
     file_service: FileService = Depends(get_file_service),
+    current_user: UserContext = Depends(require_verified_user),
 ):
     """
     上传用户头像。
     此端点内部硬编码使用 'user_avatars' profile。
     """
-    result = await file_service.upload_user_avatar(file=file, user_id=user_id)
+    result = await file_service.upload_user_avatar(
+        file=file,
+        user_id=user_id,
+        uploader_context=current_user
+    )
     return response_success(data=result, message="头像上传成功。")
 
 
@@ -189,7 +194,7 @@ async def generate_presigned_upload_policy_by_profile(
     return response_success(data=result)
 @router.get(
     "/files",
-    response_model=StandardResponse[List[str]],
+    response_model=StandardResponse[List[FileInfo]],
     summary="按 Profile 列出文件"
 )
 async def list_files_by_profile(
@@ -204,6 +209,27 @@ async def list_files_by_profile(
     )
     return response_success(data=files_list)
 
+
+@router.post(
+    "/files/move",
+    response_model=StandardResponse[FileRecordRead],
+    summary="移动文件并更新其数据库记录",
+    dependencies=[Depends(require_verified_user)]
+)
+async def move_file(
+    payload: MoveFilePayload,
+    service: FileRecordService = Depends(get_file_record_service), # 注意：编排操作由 FileRecordService 发起
+):
+    """
+    将一个文件从源路径移动到目标路径，并原子性地更新数据库记录。
+    常用于将临时文件转正。
+    """
+    updated_record = await service.move_file_and_update_record(
+        record_id=payload.record_id,
+        destination_key=payload.destination_key,
+        profile_name=payload.profile_name
+    )
+    return response_success(data=updated_record, message="文件移动成功。")
 
 @router.post(
     "/register",

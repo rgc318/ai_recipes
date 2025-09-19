@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, TypedDict
 from uuid import UUID
 
 from sqlmodel import Field, Relationship
@@ -24,6 +24,9 @@ class FileRecord(BaseModel, table=True):
         description="文件在对象存储中的唯一路径/键"
     )
     original_filename: str = Field(..., description="文件的原始名称")
+    description: Optional[str] = Field(None, description="文件的描述或备注")
+    alt_text: Optional[str] = Field(None, description="图片的替代文本 (用于SEO和可访问性)")
+
     file_size: int = Field(..., description="文件大小（字节）")
     content_type: str = Field(..., description="文件的 MIME 类型")
     is_associated: Optional[bool] = Field(default=False, description="文件是否关联了业务数据")
@@ -43,3 +46,10 @@ class FileRecord(BaseModel, table=True):
     )
 
     uploader: "User" = Relationship(back_populates="uploaded_files")
+
+
+
+
+class ForeignKeyReference(TypedDict):
+    table_name: str
+    column_name: str
