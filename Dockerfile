@@ -75,7 +75,7 @@ ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
 WORKDIR /app
 
 # (最佳实践) 先只复制依赖定义文件
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml ./
 
 
 
@@ -84,11 +84,12 @@ COPY pyproject.toml uv.lock* ./
 # --system: 将包安装到全局的 site-packages，这是在 Docker 容器内的推荐做法
 # --no-cache: uv 默认就不怎么用缓存，但明确指定可以确保镜像体积最小
 # RUN uv pip install --system --no-cache --no-deps .
-# 1. 先编译出一个精确的依赖锁文件
-RUN uv pip sync --system --no-cache uv.lock
-# --- Stage 2: final ---
-# 这是最终的生产镜像，它会非常轻量
-FROM python:3.12-slim
+
+# 6. (关键修复) 在容器内部，根据 pyproject.toml 动态生成一个标准的 requirements.txt 锁文件
+RUN uv pip compile pyproject.toml -o requirements.txt
+
+# 7. 使用这个新生成的、格式绝对正确的 requirements.txt 来同步依赖
+RUN uv pip sync --system --no-cache requirements.txt
 
 # 创建一个非 root 用户来运行应用，增强安全性
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
