@@ -64,6 +64,7 @@ FROM python:3.12-slim as builder
 
 # 安装 uv
 # uv 是一个静态二进制文件，可以直接下载使用，非常适合 Docker
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 将 uv 添加到系统 PATH
@@ -76,7 +77,7 @@ WORKDIR /app
 # (最佳实践) 先只复制依赖定义文件
 COPY pyproject.toml uv.lock* ./
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 
 
 # 使用 uv 高效地安装依赖
