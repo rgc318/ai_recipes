@@ -1,0 +1,11 @@
+# 自动处理文本文件的换行符
+# Git会检出（checkout）符合当前操作系统习惯的换行符，
+# 但在提交（commit）时，会统一将它们转换为LF（\n）
+* text=auto
+
+# 明确指定哪些文件不是文本文件，避免Git错误处理
+*.png binary
+*.jpg binary
+*.gif binary
+*.pyc binary
+*.so binary

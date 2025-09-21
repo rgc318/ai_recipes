@@ -23,6 +23,9 @@ router = APIRouter()
 # def get_auth_service(session: AsyncSession = Depends(get_session)) -> AuthService:
 #     return AuthService(RepositoryFactory(session))
 
+@router.get("/health", status_code=200, tags=["Health Check"])
+def health_check():
+    return {"status": "ok"}
 
 # === Register ===
 @router.post(

@@ -1,23 +1,70 @@
+# pyproject.toml
+
 [project]
 name = "ai-recipes"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-driven recipe management system"
 requires-python = ">=3.12"
+
+# 主要依赖
 dependencies = [
+    # --- 核心框架 ---
     "fastapi>=0.115.14",
     "uvicorn>=0.35.0",
-    "httpx",
-    "email-validator",
-    "passlib",
-    "bcrypt",
-    "boto3",
-    "pyyaml",
-    "python-multipart",
-    "tenacity",
-    "pyjwt==2.10.1",
-    "python-jose",
-    "prometheus_client",
-    "aioredis",
-    "slugify>=0.0.1",
+    "gunicorn>=22.0.0",
+    "pydantic>=2.8.2",
+    "pydantic-settings>=2.10.1",
+    "starlette>=0.37.2",
+    "PyYAML>=6.0.1",
+
+    # --- 数据库 ---
+    "sqlalchemy[asyncio]>=2.0.0",
+    "sqlmodel>=0.0.25",
     "alembic>=1.16.4",
+    "asyncpg>=0.30.0",           # PostgreSQL 异步驱动
+
+    # --- 存储 ---
+    "boto3>=1.34.120",
+    "botocore>=1.34.120",
+
+    # --- 缓存 ---
+    "aioredis>=2.0.1",
+    "redis>=6.4.0",
+
+    # --- 安全与认证 ---
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "pyjwt>=2.8.0",
+    "Authlib>=1.3.1",
+
+    # --- 工具与杂项 ---
+    "httpx>=0.27.0",
+    "email-validator>=2.2.0",
+    "python-multipart>=0.0.9",
+    "tenacity>=8.4.1",
+    "loguru>=0.7.2",
+    "prometheus_client>=0.20.0",
+    "dotenv>=0.9.9",
+    # 注意：slugify 是一个几乎无人维护的包，如果要用推荐改成 python-slugify
+    "slugify>=0.0.1",
+    # 如果不再使用，可以移除 deptry 本体
+    "deptry>=0.23.1",
+]
+
+# 专门存放开发工具的依赖组
+[project.optional-dependencies]
+dev = [
+    "deptry>=0.17.0"
+]
+
+# 配置 deptry 忽略误报
+[tool.deptry]
+ignore_obsolete = [
+    "uvicorn",
+    "gunicorn",
+    "asyncpg",
+    "aioredis",
+    "email-validator",
+    "python-multipart",
+    "psycopg2-binary",  # 如果你确实不再用 psycopg2，可以从这里移除
 ]

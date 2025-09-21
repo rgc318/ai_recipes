@@ -1,0 +1,27 @@
+# .dockerignore
+
+# Git and IDE files
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache and temp files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment files (!!! 重要：防止密钥被打包进镜像 !!!)
+*.env
+.env.*
+
+# Local development/test files
+.pytest_cache/
+htmlcov/
+minio-data/ # 如果你把minio的数据目录放在了项目里

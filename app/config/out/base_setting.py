@@ -14,7 +14,31 @@ from app.config.config_settings.config_loader import load_config_file
 # 项目根目录，定义为当前文件的上两级目录
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # 强制加载 env（使用绝对路径确保加载正确）
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+# load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+
+
+def load_environments():
+    """
+    根据 ENV 环境变量，分层加载 .env 文件。
+    这个函数应该在所有配置类定义之前被调用。
+    """
+    env = os.getenv("ENV", "dev") # 默认环境为 'dev'
+    logger.info(f"🌍 当前环境 (pydantic-settings): {env}")
+
+    # 加载通用 .env
+    base_env_path = BASE_DIR / ".env"
+    if base_env_path.exists():
+        load_dotenv(dotenv_path=base_env_path)
+        logger.info(f"✔️ 已加载通用 .env 文件: {base_env_path}")
+
+    # 加载特定环境 .env
+    env_specific_path = BASE_DIR / f".env.{env}"
+    if env_specific_path.exists():
+        load_dotenv(dotenv_path=env_specific_path, override=True)
+        logger.info(f"✔️ 已加载特定环境 .env 文件: {env_specific_path}")
+
+
+load_environments()
 
 # === MinIO 配置 ===
 class MinIOConfig(BaseSettings):
@@ -54,7 +78,7 @@ class AppConfig(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     model_config = SettingsConfigDict(
-        env_file=os.path.join(BASE_DIR, '.env'),
+        # env_file=os.path.join(BASE_DIR, '.env'),
         env_file_encoding='utf-8',
         extra='ignore',
         case_sensitive=False, # 环境变量不区分大小写
