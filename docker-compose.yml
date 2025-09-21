@@ -1,0 +1,102 @@
+# docker-compose.yml (生产环境部署版本)
+# 这个文件定义了应用及其所有依赖服务的容器化部署方案。
+
+version: '3.8'
+
+services:
+  # -----------------------------------------------
+  # 1. 你的 FastAPI 应用服务 (app)
+  # -----------------------------------------------
+  app:
+    # build: . 表示使用当前目录下的 Dockerfile 来构建镜像
+    build: ./backend/ai_recipes
+    image: ai-recipes-app:latest
+    container_name: ai-recipes-app
+    # env_file: 将指定的 .env 文件中的所有变量作为环境变量注入到这个容器中
+    env_file:
+      - .env.test  # 在生产服务器上，我们使用 .env.prod
+    # ports: 将主机的 8000 端口映射到容器的 8000 端口，这样我们才能从外部访问 API
+    ports:
+      - "8000:8000"
+    # depends_on: 确保在启动 app 服务之前，其他依赖服务已经先启动
+    # depends_on:
+    #   - postgres
+    #   - redis
+    #   - minio
+    # restart: always 表示如果容器意外退出，Docker 会自动尝试重启它
+    restart: always
+    # networks: 将此服务连接到我们定义的 app-network 网络中
+    networks:
+      - app-network
+
+  # -----------------------------------------------
+  # 2. PostgreSQL 数据库服务 (postgres)
+  # -----------------------------------------------
+#  postgres:
+#    image: postgres:16-alpine # 使用官方的、轻量的 PostgreSQL 镜像
+#    container_name: ai-recipes-postgres
+#    volumes:
+#      # 将数据库数据持久化存储在名为 postgres_data 的 Docker 卷中，防止容器删除后数据丢失
+#      - postgres_data:/var/lib/postgresql/data
+#    environment:
+#      # 从 .env 文件中读取数据库的用户名、密码和数据库名
+#      - POSTGRES_USER=${DB_USER}
+#      - POSTGRES_PASSWORD=${DB_PASSWORD}
+#      - POSTGRES_DB=${DB_NAME}
+#    ports:
+#      # （可选）可以将数据库端口映射出来，方便在本地使用 Navicat 等工具连接调试
+#      - "54321:5432"
+#    restart: always
+#    networks:
+#      - app-network
+
+  # -----------------------------------------------
+  # 3. Redis 缓存服务 (redis)
+  # -----------------------------------------------
+#  redis:
+#    image: redis:7-alpine # 使用官方的、轻量的 Redis 镜像
+#    container_name: ai-recipes-redis
+#    volumes:
+#      - redis_data:/data # 数据持久化
+#    # command: 启动 redis 并设置密码，密码从 .env 文件读取
+#    command: redis-server --requirepass ${REDIS_PASSWORD}
+#    restart: always
+#    networks:
+#      - app-network
+
+  # -----------------------------------------------
+  # 4. MinIO 对象存储服务 (minio)
+  # -----------------------------------------------
+#  minio:
+#    image: minio/minio:latest # 使用官方的 MinIO 镜像
+#    container_name: ai-recipes-minio
+#    volumes:
+#      - minio_data:/data # 数据持久化
+#    ports:
+#      - "9000:9000"  # MinIO 的 API 端口
+#      - "9001:9001"  # MinIO 的 Web 控制台端口
+#    environment:
+#      # 从 .env 文件读取 MinIO 的 root 用户和密码
+#      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+#      - MINIO_ROOT_PASSWORD=${MINIO_SECRET}
+#    # command: 启动 MinIO 服务器，并指定数据目录和控制台地址
+#    command: server /data --console-address ":9001"
+#    restart: always
+#    networks:
+#      - app-network
+
+# -----------------------------------------------
+# 顶层定义
+# -----------------------------------------------
+
+# volumes: 定义所有具名卷，用于数据的持久化
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+# networks: 定义一个自定义的桥接网络，让所有服务都在同一个网络内，
+# 这样它们就可以通过服务名（如 'postgres', 'redis'）互相访问
+networks:
+  app-network:
+    driver: bridge
