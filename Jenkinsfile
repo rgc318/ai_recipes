@@ -13,7 +13,7 @@ pipeline {
     environment {
         REGISTRY              = 'rgc318'
         IMAGE_NAME            = 'ai-recipes-app'
-        SERVER_USER           = 'vivyayjl'
+        SERVER_USER           = 'vivy'
         SERVER_IP             = '192.168.31.229'
         SERVER_PROJECT_PATH   = '/srv/ai_recipes'
         DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
