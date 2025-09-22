@@ -89,7 +89,7 @@ pipeline {
                                 docker image prune -af
 
                                 echo "🎉 部署成功！"
-'EOF'
+                            EOF
                         """
                     }
                 }
