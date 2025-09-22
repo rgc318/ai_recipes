@@ -37,7 +37,7 @@ pipeline {
                 }
 
                 // 构建镜像
-                sh "docker build -t ${env.REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} ./backend/ai_recipes"
+                sh "docker build -t ${env.REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} ."
                 sh "docker tag ${env.REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} ${env.REGISTRY}/${env.IMAGE_NAME}:latest"
 
                 // 将镜像打包成 tar 文件
