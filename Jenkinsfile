@@ -59,10 +59,14 @@ pipeline {
                         // 注意: 这里也去掉了 -o StrictHostKeyChecking=no，建议提前配置好 known_hosts
                         sh "scp -o StrictHostKeyChecking=no ./${env.IMAGE_FILENAME} ${env.SERVER_USER}@${env.SERVER_IP}:${env.SERVER_PROJECT_PATH}/${env.IMAGE_FILENAME}"
 
+                        // 2.【新增!】传输最新的 docker-compose.yml 文件
+                        echo "--- 正在同步最新的 docker-compose.yml 文件 ---"
+                        sh "scp -o StrictHostKeyChecking=no ./docker-compose.yml ${env.SERVER_USER}@${env.SERVER_IP}:${env.SERVER_PROJECT_PATH}/docker-compose.yml"
+
                         // 2. SSH 到服务器执行加载和部署命令
                         echo "--- 正在服务器上加载镜像并重启服务 ---"
                         sh """
-                            ssh -o StrictHostKeyChecking=no ${env.SERVER_USER}@${env.SERVER_IP} << EOF
+                            ssh -o 'StrictHostKeyChecking=no' ${env.SERVER_USER}@${env.SERVER_IP} 'bash -s' << 'EOF'
                                 echo "✅ 成功登录到服务器！"
 
                                 # 进入你的项目目录
@@ -76,7 +80,6 @@ pipeline {
                                 # 删除已传输的 tar 包，节省空间
                                 rm ${env.IMAGE_FILENAME}
 
-                                # 注意：不再需要 docker compose pull
                                 # 直接使用新加载的镜像重新启动服务
                                 echo "--- 正在使用新镜像重启服务 ---"
                                 docker compose up -d --remove-orphans app
@@ -86,7 +89,7 @@ pipeline {
                                 docker image prune -af
 
                                 echo "🎉 部署成功！"
-                            EOF
+                            'EOF'
                         """
                     }
                 }

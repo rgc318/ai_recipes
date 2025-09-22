@@ -10,7 +10,7 @@ services:
   app:
     # build: . 表示使用当前目录下的 Dockerfile 来构建镜像
     build: ./backend/ai_recipes
-    image: ai-recipes-app:latest
+    image: rgc318/ai-recipes-app:latest
     container_name: ai-recipes-app
     # env_file: 将指定的 .env 文件中的所有变量作为环境变量注入到这个容器中
     env_file:
