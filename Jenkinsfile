@@ -2,12 +2,25 @@
 
 pipeline {
     // 1. 定义构建环境 (不变)
-    agent {
-        docker {
-            image 'docker:26-cli'
-            args '-u root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+//     agent {
+//         docker {
+//             image 'docker:26-cli'
+//             args '-u root -v /var/run/docker.sock:/var/run/docker.sock'
+//         }
+//     }
+
+        agent {
+                label 'dynamic-docker-agent' // 只需指定模板的标签
+            }
+            stages {
+                stage('Build inside a Dynamic Agent') {
+                    steps {
+                        sh 'uname -a'       // 这将在 jenkins/inbound-agent 容器中执行
+                        sh 'git --version'  // 容器内必须有 git
+                        sh 'docker --version' // 如果您想在这个 Agent 里再控制 Docker，容器内还需要 Docker CLI
+                    }
+                }
+            }
 
     // 2. 定义环境变量 (不变)
     environment {
