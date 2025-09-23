@@ -27,7 +27,7 @@ services:
     restart: always
     # networks: 将此服务连接到我们定义的 app-network 网络中
     networks:
-      - app-network
+      - ai_recipes_shared_net
 
   # -----------------------------------------------
   # 2. PostgreSQL 数据库服务 (postgres)
@@ -99,5 +99,6 @@ volumes:
 # networks: 定义一个自定义的桥接网络，让所有服务都在同一个网络内，
 # 这样它们就可以通过服务名（如 'postgres', 'redis'）互相访问
 networks:
-  app-network:
-    driver: bridge
+    ai_recipes_shared_net:
+        external: true
+        name: ai-recipes-shared-network
