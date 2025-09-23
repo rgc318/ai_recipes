@@ -15,7 +15,7 @@ pipeline {
         IMAGE_NAME            = 'ai-recipes-app'
         SERVER_USER           = 'vivy'
         SERVER_IP             = '192.168.31.229'
-        SERVER_PROJECT_PATH   = '/srv/ai_recipes'
+        SERVER_PROJECT_PATH   = '/srv/ai_recipes/backend'
         DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
         SERVER_CREDENTIALS_ID = 'server-ssh-key'
     }
