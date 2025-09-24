@@ -44,6 +44,7 @@ dependencies = [
     "slugify>=0.0.1",
     # 如果不再使用，可以移除 deptry 本体
     "deptry>=0.23.1",
+    "git-filter-repo>=2.47.0",
 ]
 
 # 专门存放开发工具的依赖组
