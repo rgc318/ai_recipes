@@ -3,6 +3,7 @@ from typing import Optional, Set, List
 from uuid import UUID
 
 from sqlalchemy import Column, Integer, DateTime, UniqueConstraint, text, Index
+from sqlalchemy.orm import declared_attr
 from sqlmodel import Field, Relationship
 
 from app.enums.auth_method import AuthMethod
@@ -35,14 +36,19 @@ class Role(BaseModel, table=True):
     permissions: List["Permission"] = Relationship(back_populates="roles", link_model=RolePermission)
 
 
-    __table_args__ = (
-        Index(
-            "ix_role_code_active_unique",
-            "code",
-            unique=True,
-            postgresql_where=(Column("is_deleted") == False)
-        ),
-    )
+    # __table_args__ = (
+    #     Index(
+    #         "ix_role_code_active_unique",
+    #         "code",
+    #         unique=True,
+    #         postgresql_where=(Column("is_deleted") == False)
+    #     ),
+    # )
+    __table_args__ = BaseModel.soft_unique_index("code")
+
+    @declared_attr
+    def __table_args__(cls):
+        return cls.soft_unique_index(cls.__tablename__, "code", )
 
 class Permission(BaseModel, table=True):
     # 【新增】code 字段，作为系统内部唯一、不可变的标识符
@@ -55,22 +61,26 @@ class Permission(BaseModel, table=True):
     roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)
 
     # 【新增2】添加 __table_args__ 来定义部分唯一索引
-    __table_args__ = (
-        Index(
-            'ix_permission_code_active_unique',  # 索引的名称
-            'code',  # 需要索引的列
-            unique=True,  # 这是一个唯一索引
-            postgresql_where=(Column("is_deleted") == False)  # 只在 is_deleted = false 时生效
-        ),
-    )
+    # __table_args__ = (
+    #     Index(
+    #         'ix_permission_code_active_unique',  # 索引的名称
+    #         'code',  # 需要索引的列
+    #         unique=True,  # 这是一个唯一索引
+    #         postgresql_where=(Column("is_deleted") == False)  # 只在 is_deleted = false 时生效
+    #     ),
+    # )
+    @declared_attr
+    def __table_args__(cls):
+        return cls.soft_unique_index(cls.__tablename__, "code")
+
 class User(BaseModel, table=True):
-    __tablename__ = "user"
+    # __tablename__ = "user"
     __pydantic_model__ = UserRead
     # _version_col = Column(Integer, nullable=False, server_default="1")
 
-    username: str = Field(index=True, nullable=False, unique=True)
-    email: Optional[str] = Field(default=None, index=True, unique=True)
-    phone: Optional[str] = Field(default=None, index=True, unique=True)
+    username: str = Field(index=True, nullable=False, )
+    email: Optional[str] = Field(default=None, index=True, )
+    phone: Optional[str] = Field(default=None, index=True, )
 
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
@@ -108,6 +118,10 @@ class User(BaseModel, table=True):
         "version_id_col": version.sa_column,
         "version_id_generator": False  # 或根据需求自定义
     }
+    @declared_attr
+    def __table_args__(cls):
+        return cls.soft_unique_index(cls.__tablename__, "username", "phone", "email", batch=True)
+
     @property
     def permissions(self) -> Set[str]:
         perms = set()

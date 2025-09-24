@@ -2,6 +2,8 @@ from sqlmodel import SQLModel, Field
 from sqlalchemy.ext.declarative import declared_attr
 import uuid
 import re
+
+from app.models.base.meta import SoftDeleteUniqueMeta
 from app.models.base.timestamp_mixin import TimestampMixin
 from app.models.base.audit_mixin import AuditMixin
 from app.models.base.soft_delete_mixin import SoftDeleteMixin
@@ -25,7 +27,9 @@ class BaseModel(
     SoftDeleteMixin,
     TimestampMixin,
     AuditMixin,
-    IdMixin
+    IdMixin,
+    # metaclass=SoftDeleteUniqueMeta
 ):
     __abstract__ = True
+
 

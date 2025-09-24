@@ -2,6 +2,7 @@ from typing import Optional, List
 import uuid
 
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import declared_attr
 from sqlmodel import SQLModel, Field, Relationship
 from app.models._model_utils.guid import GUID
 from app.models.base.base_model import BaseModel, AutoTableNameMixin
@@ -61,9 +62,14 @@ class Unit(BaseModel, table=True):
 class Ingredient(BaseModel, table=True):
     name: str
     description: Optional[str] = None
-    normalized_name: Optional[str] = Field(default=None, index=True, unique=True)
+    normalized_name: Optional[str] = Field(default=None, index=True, )
     plural_name: Optional[str] = None
 
+    # __table_args__ = BaseModel.soft_unique_index("normalized_name")
+
+    @declared_attr
+    def __table_args__(cls):
+        return cls.soft_unique_index(cls.__tablename__, "normalized_name",)
 
 # === 菜谱中的配料 RecipeIngredient（中间表）===
 class RecipeIngredient(AutoTableNameMixin, SQLModel,  table=True):

@@ -3,6 +3,7 @@ from typing import List, Optional, TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import declared_attr
 from sqlmodel import Field, Relationship
 
 from app.models.base.base_model import BaseModel
@@ -24,8 +25,8 @@ class RecipeCategoryLink(BaseModel, table=True):
 class Category(BaseModel, table=True):
     __tablename__ = "category"
 
-    name: str = Field(..., index=True, unique=True)
-    slug: str = Field(..., index=True, unique=True, description="用于URL的唯一标识")
+    name: str = Field(..., index=True, )
+    slug: str = Field(..., index=True, description="用于URL的唯一标识")
     description: Optional[str] = None
 
     # --- 用于实现层级关系 ---
@@ -49,6 +50,11 @@ class Category(BaseModel, table=True):
     )
 
     recipes: List["Recipe"] = Relationship(back_populates="categories", link_model=RecipeCategoryLink)
+    # __table_args__ = BaseModel.soft_unique_index("slug", "name", batch= True)
+
+    @declared_attr
+    def __table_args__(cls):
+        return cls.soft_unique_index(cls.__tablename__, "slug", "name", batch= True)
 
 def get_descendant_ids(category_id: UUID, all_categories: list[Category]) -> set[UUID]:
     """

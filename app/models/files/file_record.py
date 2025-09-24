@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING, Optional, TypedDict
 from uuid import UUID
 
+from sqlalchemy import Index, text, Column
+from sqlalchemy.orm import declared_attr
 from sqlmodel import Field, Relationship
 
 from app.models.base.base_model import BaseModel
@@ -19,7 +21,7 @@ class FileRecord(BaseModel, table=True):
     # --- 核心元数据 ---
     object_name: str = Field(
         ...,
-        unique=True,
+        # unique=True,
         index=True,
         description="文件在对象存储中的唯一路径/键"
     )
@@ -47,8 +49,19 @@ class FileRecord(BaseModel, table=True):
 
     uploader: "User" = Relationship(back_populates="uploaded_files")
 
+    # __table_args__ = (
+    #     Index(
+    #         'ix_file_record_object_name_active',  # 索引的名称
+    #         'object_name',  # 需要索引的列
+    #         unique=True,  # 这是一个唯一索引
+    #         postgresql_where=(Column("is_deleted") == False)  # 只在 is_deleted = false 时生效
+    #     ),
+    # )
+    # __table_args__ = BaseModel.soft_unique_index("object_name")
 
-
+    @declared_attr
+    def __table_args__(cls):
+        return cls.soft_unique_index(cls.__tablename__, "object_name")
 
 class ForeignKeyReference(TypedDict):
     table_name: str
