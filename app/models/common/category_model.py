@@ -2,8 +2,8 @@
 from typing import List, Optional, TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import UniqueConstraint
-from sqlalchemy.orm import declared_attr
+from sqlalchemy import UniqueConstraint, and_
+from sqlalchemy.orm import declared_attr, remote, foreign
 from sqlmodel import Field, Relationship
 
 from app.models.base.base_model import BaseModel
@@ -42,14 +42,23 @@ class Category(BaseModel, table=True):
     # '一对多' 的关系
     children: List["Category"] = Relationship(
         back_populates="parent",
-        # 【核心优化】添加级联删除配置
-        # cascade="all, delete-orphan" 的意思是：
-        # 对父对象的所有操作（保存、删除等）都会传递给子对象。
-        # 当一个父对象被从会话中移除时，所有子对象也会被删除。
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={
+            # 使用 remote() 包裹住 parent_id，明确它是远程列
+            "primaryjoin": lambda: and_(
+                Category.id == remote(foreign(Category.parent_id)),
+                Category.is_deleted == False
+            ),
+            "cascade": "all, delete-orphan"
+        }
     )
 
-    recipes: List["Recipe"] = Relationship(back_populates="categories", link_model=RecipeCategoryLink)
+    recipes: List["Recipe"] = Relationship(
+        back_populates="categories",
+        link_model=RecipeCategoryLink,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RecipeCategoryLink.recipe_id == Recipe.id, Recipe.is_deleted == False)"
+        }
+    )
     # __table_args__ = BaseModel.soft_unique_index("slug", "name", batch= True)
 
     @declared_attr

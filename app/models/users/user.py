@@ -32,8 +32,20 @@ class Role(BaseModel, table=True):
     name: str = Field(..., description="角色的显示名称，人类可读，可修改")
     description: Optional[str] = None
 
-    users: List["User"] = Relationship(back_populates="roles", link_model=UserRole)
-    permissions: List["Permission"] = Relationship(back_populates="roles", link_model=RolePermission)
+    users: List["User"] = Relationship(
+        back_populates="roles",
+        link_model=UserRole,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(UserRole.user_id == User.id, User.is_deleted == False)"
+        }
+    )
+    permissions: List["Permission"] = Relationship(
+        back_populates="roles",
+        link_model=RolePermission,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RolePermission.permission_id == Permission.id, Permission.is_deleted == False)"
+        }
+    )
 
 
     # __table_args__ = (
@@ -58,7 +70,13 @@ class Permission(BaseModel, table=True):
     group: str = Field(..., description="所属模块，如 '用户管理'")
     description: Optional[str] = None
 
-    roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermission)
+    roles: List["Role"] = Relationship(
+        back_populates="permissions",
+        link_model=RolePermission,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RolePermission.role_id == Role.id, Role.is_deleted == False)"
+        }
+    )
 
     # 【新增2】添加 __table_args__ 来定义部分唯一索引
     # __table_args__ = (
@@ -99,10 +117,20 @@ class User(BaseModel, table=True):
     # )
     login_count: int = Field(default=0)
 
-    roles: List["Role"] = Relationship(back_populates="users", link_model=UserRole)
+    roles: List["Role"] = Relationship(
+        back_populates="users",
+        link_model=UserRole,
+        sa_relationship_kwargs={
+            # secondaryjoin 定义了中间表 (UserRole) 和目标表 (Role) 的连接条件
+            "secondaryjoin": "and_(UserRole.role_id == Role.id, Role.is_deleted == False)"
+        }
+    )
     uploaded_files: List["FileRecord"] = Relationship(
-        back_populates="uploader"
-        # No need for foreign_keys hint if there's only one link
+        back_populates="uploader",
+        sa_relationship_kwargs={
+            # primaryjoin 定义了源表 (User) 和目标表 (FileRecord) 的连接条件
+            "primaryjoin": "and_(User.id == FileRecord.uploader_id, FileRecord.is_deleted == False)"
+        }
     )
     # 【新增】乐观锁的版本号字段
 

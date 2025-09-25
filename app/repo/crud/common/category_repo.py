@@ -168,7 +168,10 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
         unique_ids = set(ids)
 
         # 构建查询，只查询符合条件的ID的数量
-        stmt = select(func.count(self.model.id)).where(self.model.id.in_(unique_ids))
+        stmt = select(func.count(self.model.id)).where(
+            self.model.id.in_(unique_ids),
+            self.model.is_deleted == False  # <--- 只在活跃的分类中查找
+        )
 
         result = await self.db.execute(stmt)
         existing_count = result.scalar_one()
@@ -213,7 +216,7 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
         # 定义递归查询的初始部分（种子）
         category_cte = (
             select(self.model)
-            .where(self.model.id == category_id)
+            .where(self.model.id == category_id, self.model.is_deleted == False)
             .cte(name="category_cte", recursive=True)
         )
 
@@ -223,12 +226,13 @@ class CategoryRepository(BaseRepository[Category, CategoryCreate, CategoryUpdate
 
         category_cte = category_cte.union_all(
             select(model_alias).where(
-                model_alias.c.parent_id == cte_alias.c.id
+                model_alias.c.parent_id == cte_alias.c.id,
+                model_alias.c.is_deleted == False
             )
         )
 
         # 【修改】执行最终查询，这次不再排除自身
-        stmt = select(self.model).join(
+        stmt = self._base_stmt().join(
             category_cte, self.model.id == category_cte.c.id
         )
 
