@@ -41,7 +41,12 @@ class RecipeStep(BaseModel, table=True):
     duration: Optional[str] = Field(None, description="此步骤预计花费的时间, e.g., '10分钟'")
 
     # 一个步骤可以有多张图片
-    images: List["FileRecord"] = Relationship(link_model=RecipeStepImageLink)
+    images: List["FileRecord"] = Relationship(
+        link_model=RecipeStepImageLink,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RecipeStepImageLink.file_id == FileRecord.id, FileRecord.is_deleted == False)"
+        }
+    )
     recipe: "Recipe" = Relationship(back_populates="steps")
 
 class Tag(BaseModel, table=True):
@@ -99,32 +104,54 @@ class Recipe(BaseModel, table=True):
     cover_image_id: Optional[uuid.UUID] = Field(default=None, foreign_key="file_record.id")
     cover_image: Optional["FileRecord"] = Relationship(
         sa_relationship_kwargs={
-            "primaryjoin": "Recipe.cover_image_id == FileRecord.id",
+            "primaryjoin": "and_(Recipe.cover_image_id == FileRecord.id, FileRecord.is_deleted == False)",
         }
     )
     author_notes: Optional[str] = Field(None, description="作者小贴士")
     # 2. 图片画廊 (多对多关系)
-    gallery_images: List["FileRecord"] = Relationship(link_model=RecipeGalleryLink)
+    gallery_images: List["FileRecord"] = Relationship(
+        link_model=RecipeGalleryLink,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RecipeGalleryLink.file_id == FileRecord.id, FileRecord.is_deleted == False)"
+        }
+    )
 
     # 3. 结构化步骤 (一对多关系)
     steps: List["RecipeStep"] = Relationship(
         back_populates="recipe",
         sa_relationship_kwargs={
+            "primaryjoin": "and_(Recipe.id == RecipeStep.recipe_id, RecipeStep.is_deleted == False)",
             "order_by": "RecipeStep.step_number",
-            "cascade": "all, delete-orphan"  # 删除菜谱时，级联删除其所有步骤
+            "cascade": "all, delete-orphan"
         }
     )
 
     ingredients: List["RecipeIngredient"] = Relationship(
         back_populates="recipe",
-        # 【核心修改】添加这一行 sa_relationship_kwargs
         sa_relationship_kwargs={
+            # 假设 RecipeIngredient 继承了 BaseModel 并有 is_deleted
+            # "primaryjoin": "and_(Recipe.id == RecipeIngredient.recipe_id, RecipeIngredient.is_deleted == False)",
             "cascade": "all, delete-orphan"
         }
     )
 
-    tags: List["Tag"] = Relationship(back_populates="recipes", link_model=RecipeTagLink)
-    categories: List["Category"] = Relationship(back_populates="recipes", link_model=RecipeCategoryLink)
+    tags: List["Tag"] = Relationship(
+        back_populates="recipes",
+        link_model=RecipeTagLink,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RecipeTagLink.tag_id == Tag.id, Tag.is_deleted == False)"
+        }
+    )
+
+    # 【核心修正 7】
+    # 分类 (多对多关系)，只加载未被软删除的分类
+    categories: List["Category"] = Relationship(
+        back_populates="recipes",
+        link_model=RecipeCategoryLink,
+        sa_relationship_kwargs={
+            "secondaryjoin": "and_(RecipeCategoryLink.category_id == Category.id, Category.is_deleted == False)"
+        }
+    )
 
 # 设置反向关系
 RecipeIngredient.recipe = Relationship(back_populates="ingredients")
