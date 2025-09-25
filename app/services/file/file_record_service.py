@@ -13,7 +13,8 @@ from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.models.files.file_record import FileRecord, ForeignKeyReference
 from app.repo.crud.recipes.recipe_repo import RecipeRepository
 from app.repo.crud.users.user_repo import UserRepository
-from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate, FileRecordRead
+from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate, FileRecordRead, \
+    FileDeleteCheckResponse
 from app.schemas.common.page_schemas import PageResponse
 from app.schemas.users.user_context import UserContext
 from app.services._base_service import BaseService
@@ -522,3 +523,63 @@ class FileRecordService(BaseService):
 
         self.logger.info(f"批量永久删除了 {deleted_count} 个文件和记录。")
         return deleted_count
+
+    async def check_and_soft_delete_records(
+        self, record_ids: List[UUID], force: bool = False
+    ) -> FileDeleteCheckResponse:
+        """
+        一个智能的软删除方法，专门给文件管理API使用。
+        它会检查文件使用情况，并根据 force 参数决定行为。
+        """
+        if not record_ids:
+            return FileDeleteCheckResponse(status="success", message="没有需要删除的文件。", safe_to_delete_count=0)
+
+        repo = self.file_repo
+
+        # --- 1. 如果不是强制删除，则先进行使用检查 ---
+        if not force:
+            records_to_check = await repo.get_by_ids(record_ids, view_mode=ViewMode.ACTIVE)
+
+            in_use_map: Dict[UUID, str] = {}
+            safe_to_delete_ids: List[UUID] = []
+
+            # 并发检查以提高效率
+            check_tasks = {record.id: self.is_record_in_use(record.id) for record in records_to_check}
+            results = await asyncio.gather(*check_tasks.values())
+
+            record_map = {r.id: r for r in records_to_check}
+            for (record_id, task), is_in_use in zip(check_tasks.items(), results):
+                if is_in_use:
+                    in_use_map[record_id] = record_map[record_id].original_filename
+                else:
+                    safe_to_delete_ids.append(record_id)
+
+            # --- 2. 根据检查结果，决定下一步行为 ---
+            if in_use_map:
+                # 发现有文件正在被使用
+                deleted_count_now = 0
+                # a) 如果同时有可以安全删除的文件，先把它们删掉
+                if safe_to_delete_ids:
+                    deleted_count_now = await self.soft_delete_records_by_ids(safe_to_delete_ids)
+
+                # b) 返回一个警告，要求用户确认
+                message = (
+                    f"操作部分完成。成功删除 {deleted_count_now} 个未被使用的文件。 "
+                    f"但有 {len(in_use_map)} 个文件正在被使用，需要您确认是否删除。"
+                )
+                return FileDeleteCheckResponse(
+                    status="warning",
+                    message=message,
+                    needs_confirmation=True,
+                    in_use_files=list(in_use_map.values()),
+                    safe_to_delete_count=deleted_count_now,
+                    in_use_count=len(in_use_map)
+                )
+
+        # --- 3. 如果是强制删除，或者预检通过（即所有文件都可安全删除），则直接删除所有 ---
+        deleted_count = await self.soft_delete_records_by_ids(record_ids)
+        return FileDeleteCheckResponse(
+            status="success",
+            message=f"成功软删除了 {deleted_count} 个文件。",
+            safe_to_delete_count=deleted_count
+        )

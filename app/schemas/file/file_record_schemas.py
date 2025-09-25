@@ -101,3 +101,14 @@ class FileInfo(BaseModel):
 
 class BulkActionPayload(BaseModel):
     record_ids: List[UUID] = Field(..., min_length=1)
+
+class FileDeleteCheckResponse(BaseModel):
+    """
+    用于文件删除预检的API响应模型。
+    """
+    status: str  # 'success', 'warning', or 'error'
+    message: str
+    needs_confirmation: bool = False
+    in_use_files: Optional[List[str]] = None
+    safe_to_delete_count: int = 0
+    in_use_count: int = 0

@@ -59,13 +59,19 @@ async def restore_files_in_bulk(
         )
 async def soft_delete_files_in_bulk(
     payload: BulkActionPayload,
+# 【2. 新增】增加 force 查询参数，用于前端二次确认时调用
+    force: bool = Query(False, description="是否强制删除。默认False会先检查文件使用情况。"),
     service: FileRecordService = Depends(get_file_record_service)
 ):
     """
     根据提供的ID列表，将多条文件记录批量移入回收站。
     """
-    deleted_count = await service.soft_delete_records_by_ids(payload.record_ids)
-    return response_success(data={"deleted_count": deleted_count}, message="批量软删除操作完成")
+    result = await service.check_and_soft_delete_records(
+        record_ids=payload.record_ids,
+        force=force
+    )
+    # deleted_count = await service.soft_delete_records_by_ids(payload.record_ids)
+    return response_success(data=result, message="批量软删除操作完成")
 
 @router.delete(
         "/bulk/permanent",
