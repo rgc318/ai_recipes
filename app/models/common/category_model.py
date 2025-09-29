@@ -8,18 +8,15 @@ from sqlmodel import Field, Relationship
 
 from app.models.base.base_model import BaseModel
 
-if TYPE_CHECKING:
-    from app.models.recipes.recipe import Recipe
-
 
 # 菜谱与分类的多对多关联表
-class RecipeCategoryLink(BaseModel, table=True):
-    recipe_id: UUID = Field(foreign_key="recipe.id", primary_key=True)
-    category_id: UUID = Field(foreign_key="category.id", primary_key=True)
-
-    __table_args__ = (
-        UniqueConstraint("recipe_id", "category_id", name="uq_recipe_category"),
-    )
+# class RecipeCategoryLink(BaseModel, table=True):
+#     recipe_id: UUID = Field(foreign_key="recipe.id", primary_key=True)
+#     category_id: UUID = Field(foreign_key="category.id", primary_key=True)
+#
+#     __table_args__ = (
+#         UniqueConstraint("recipe_id", "category_id", name="uq_recipe_category"),
+#     )
 
 
 class Category(BaseModel, table=True):
@@ -52,13 +49,13 @@ class Category(BaseModel, table=True):
         }
     )
 
-    recipes: List["Recipe"] = Relationship(
-        back_populates="categories",
-        link_model=RecipeCategoryLink,
-        sa_relationship_kwargs={
-            "secondaryjoin": "and_(RecipeCategoryLink.recipe_id == Recipe.id, Recipe.is_deleted == False)"
-        }
-    )
+    # recipes: List["Recipe"] = Relationship(
+    #     back_populates="categories",
+    #     link_model=RecipeCategoryLink,
+    #     sa_relationship_kwargs={
+    #         "secondaryjoin": "and_(RecipeCategoryLink.recipe_id == Recipe.id, Recipe.is_deleted == False)"
+    #     }
+    # )
     # __table_args__ = BaseModel.soft_unique_index("slug", "name", batch= True)
 
     @declared_attr

@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from app.api.routes.extra import file_router, file_management_router
-from app.api.routes.recipes import recipes_router, tag_router, ingredient_router, unit_router
 from app.api.routes.management import user_router, role_router, permission_router
 from app.api.routes.auth import auth_router
 from app.api.routes.common import category_router
@@ -10,11 +9,7 @@ api_router = APIRouter()
 # 将所有路由配置定义在一个列表中
 # 每个元素都是一个包含 router, prefix, 和 tags 的字典
 routers_to_include = [
-    # recipes routers
-    {"router": recipes_router.router, "prefix": "/recipes", "tags": ["recipes"]},
-    {"router": tag_router.router, "prefix": "/tags", "tags": ["tags"]},
-    {"router": ingredient_router.router, "prefix": "/ingredients", "tags": ["ingredients"]},
-    {"router": unit_router.router, "prefix": "/units", "tags": ["units"]},
+
 
     # management routers
     {"router": user_router.router, "prefix": "/user", "tags": ["user"]},

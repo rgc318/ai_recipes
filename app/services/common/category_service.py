@@ -9,8 +9,7 @@ from app.core.exceptions import NotFoundException, AlreadyExistsException, Busin
     PermissionDeniedException
 from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
-from app.models.common.category_model import Category, RecipeCategoryLink
-from app.repo.crud.recipes.recipe_repo import RecipeRepository
+from app.models.common.category_model import Category
 from app.schemas.common.category_schemas import CategoryCreate, CategoryUpdate, CategoryRead, CategoryReadWithChildren, \
     CategoryParentRead, CategoryMergePayload
 from app.repo.crud.common.category_repo import CategoryRepository
@@ -34,7 +33,6 @@ class CategoryService(BaseService):
         user_context_dict = {"user_id": self.current_user.id if self.current_user else None}
         self.category_repo: CategoryRepository = factory.get_repo_by_type(CategoryRepository)
         self.category_repo: CategoryRepository = factory.get_repo_by_type(CategoryRepository)
-        self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)
 
     async def get_category_by_id(self, category_id: UUID) -> Category:
         """获取单个分类，未找到则抛出异常。"""
@@ -168,11 +166,11 @@ class CategoryService(BaseService):
                 raise BusinessRuleException("无法删除，请先删除其所有子分类")
 
             # 业务规则：不允许删除已关联菜谱的分类 (这部分逻辑是正确的)
-            count_stmt = select(func.count(RecipeCategoryLink.recipe_id)).where(
-                RecipeCategoryLink.category_id == category_id)
-            usage_count = await self.category_repo.db.scalar(count_stmt)
-            if usage_count > 0:
-                raise BusinessRuleException(f"无法删除，该分类正在被 {usage_count} 个菜谱使用")
+            # count_stmt = select(func.count(RecipeCategoryLink.recipe_id)).where(
+            #     RecipeCategoryLink.category_id == category_id)
+            # usage_count = await self.category_repo.db.scalar(count_stmt)
+            # if usage_count > 0:
+            #     raise BusinessRuleException(f"无法删除，该分类正在被 {usage_count} 个菜谱使用")
 
             await self.category_repo.soft_delete(category_to_delete)
 
@@ -207,10 +205,6 @@ class CategoryService(BaseService):
                 new_parent_id=target_id
             )
 
-            # 4. 重新映射菜谱关联 (这部分逻辑是正确的)
-            recipe_ids_to_remap = await self.category_repo.get_recipe_ids_for_categories(source_ids)
-            if recipe_ids_to_remap:
-                 await self.recipe_repo.add_categories_to_recipes(recipe_ids_to_remap, [target_id])
 
             # 5. 清理旧的关联关系并软删除源分类
             await self.category_repo.delete_links_for_categories(source_ids)
@@ -234,13 +228,6 @@ class CategoryService(BaseService):
             children_count = await self.category_repo.db.scalar(children_check_stmt)
             if children_count > 0:
                 raise BusinessRuleException("操作失败：选中的分类中，有分类包含子分类。")
-
-            # 3. 高效地一次性检查所有分类是否关联了菜谱
-            recipe_link_check_stmt = select(func.count(RecipeCategoryLink.id)).where(
-                RecipeCategoryLink.category_id.in_(unique_ids))
-            usage_count = await self.category_repo.db.scalar(recipe_link_check_stmt)
-            if usage_count > 0:
-                raise BusinessRuleException("操作失败：选中的分类中，有分类仍被菜谱使用。")
 
             # 4. 执行批量软删除
             deleted_count = await self.category_repo.soft_delete_by_ids(unique_ids)

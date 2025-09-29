@@ -4,7 +4,6 @@ from functools import cached_property
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Any, TypeVar
 from app.repo.crud.users.user_repo import UserRepository
-from app.repo.crud.recipes.recipe_repo import RecipeRepository
 
 RepoType = TypeVar("RepoType")
 
@@ -31,12 +30,6 @@ class RepositoryFactory:
     def user(self) -> UserRepository:
         repo = UserRepository(self._db, context=self.context)
         self._registry["user"] = repo
-        return repo
-
-    @cached_property
-    def recipe(self) -> RecipeRepository:
-        repo = RecipeRepository(self._db, context=self.context)
-        self._registry["recipe"] = repo
         return repo
 
     # 👇 动态按名称获取仓库

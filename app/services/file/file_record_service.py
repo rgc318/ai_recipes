@@ -11,7 +11,6 @@ from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.repo.crud.file.file_record_repo import FileRecordRepository
 from app.models.files.file_record import FileRecord, ForeignKeyReference
-from app.repo.crud.recipes.recipe_repo import RecipeRepository
 from app.repo.crud.users.user_repo import UserRepository
 from app.schemas.file.file_record_schemas import FileRecordCreate, FileRecordUpdate, FileRecordRead, \
     FileDeleteCheckResponse
@@ -121,22 +120,13 @@ class FileRecordService(BaseService):
         if not record_to_check:
             return False  # 记录本身不存在，自然未被使用
 
-        # 2. 检查菜谱封面 (保持不变)
-        recipe_repo = self.repo_factory.get_repo_by_type(RecipeRepository)
-        if await recipe_repo.exists_by_field(record_id, "cover_image_id", view_mode=ViewMode.ALL):
-            self.logger.info(f"File record {record_id} is in use as a recipe cover.")
-            return True
+
 
         # 3. 检查用户头像 (【核心修正】)
         user_repo = self.repo_factory.get_repo_by_type(UserRepository)
         # 我们用文件的 object_name 去 user 表的 avatar_url 字段里查找
         if record_to_check.object_name and await user_repo.exists_by_field(record_to_check.object_name, "avatar_url", view_mode=ViewMode.ALL):
             self.logger.info(f"File record {record_id} is in use as a user avatar.")
-            return True
-
-        # 4. 检查菜谱画廊或步骤 (保持不变)
-        if await recipe_repo.is_file_in_gallery_or_steps(record_id):
-            self.logger.info(f"File record {record_id} is in use in a recipe gallery or step.")
             return True
 
         self.logger.info(f"File record {record_id} is not in active use.")

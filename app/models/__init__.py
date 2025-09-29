@@ -13,13 +13,3 @@ from app.models.users.user import (
     UserRole,
     RolePermission,
 )
-
-# === 菜谱模块 ===
-from app.models.recipes.recipe import (
-    Recipe,
-    RecipeIngredient,
-    Ingredient,
-    Unit,
-    Tag,
-    RecipeTagLink,
-)
