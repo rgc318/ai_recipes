@@ -11,6 +11,7 @@ class MinioS3Params(BaseModel):
     bucket_name: str
     secure: bool = True
     cdn_base_url: Optional[str] = None
+    secure_cdn: bool = True
     public_endpoint: Optional[str] = None
 
 class AzureBlobParams(BaseModel):

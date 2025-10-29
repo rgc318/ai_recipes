@@ -1,1 +1,53 @@
-Generic single-database configuration.
+# Alembic Cheat Sheet
+
+This file provides a quick reference for common Alembic commands.
+
+## Initialization (初始化)
+
+- **`alembic init -t async alembic`**
+  - Creates a new Alembic repository named "alembic" using the async template. (创建Alembic环境)
+
+## Generating Migrations (生成迁移脚本)
+
+- **`alembic revision --autogenerate -m "Your descriptive message"`**
+  - This is the most common command. It automatically compares your SQLAlchemy/SQLModel models against the current database state and generates a new migration script with the detected changes. (自动检测模型变更并生成迁移脚本)
+
+- **`alembic revision -m "Your descriptive message"`**
+  - Creates an empty migration script. You need to manually fill in the `upgrade()` and `downgrade()` functions. Useful for complex data migrations. (创建一个空的迁移脚本供手动填写)
+
+## Applying & Reverting Migrations (应用与回滚迁移)
+
+- **`alembic upgrade head`**
+  - Applies all pending migrations, bringing the database to the latest version. (升级到最新版本)
+
+- **`alembic upgrade +1`**
+  - Applies the next single migration from the current state. (向前升级一个版本)
+
+- **`alembic upgrade <revision_id>`**
+  - Upgrades the database to a specific revision ID. (升级到指定版本)
+
+- **`alembic downgrade base`**
+  - Reverts all migrations, bringing the database to an empty state (before the first migration). **Use with caution!** (回滚所有迁移，清空数据库)
+
+- **`alembic downgrade -1`**
+  - Reverts the last applied migration. (向后回滚一个版本)
+
+- **`alembic downgrade <revision_id>`**
+  - Downgrades the database to a state just before the specified revision ID. (回滚到指定版本之前)
+
+
+## Checking Status (检查状态)
+
+- **`alembic history`**
+  - Lists all migrations, showing their revision IDs and descriptions, from the base to the head. (显示所有迁移历史)
+
+- **`alembic current`**
+  - Shows the current revision ID of the database. (显示当前数据库的版本)
+
+- **`alembic show head`**
+  - Shows the details of the latest migration script (the "head"). (显示最新迁移脚本的详细信息)
+
+## Special Commands (特殊命令)
+
+- **`alembic stamp head`**
+  - **Advanced Use:** Sets the database's revision record to a specific version (in this case, `head`) **without** running any migrations. Extremely useful for initializing Alembic on an existing database. (标记数据库为某个版本，但不执行脚本。用于在现有数据库上初始化Alembic)

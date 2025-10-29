@@ -471,6 +471,8 @@ class FileService(BaseService):
                 fields=fields
             )
 
+            logger.info(f"Generated POST Policy for {object_name}: {policy_data}")
+
             # 使用新的 Pydantic Schema 封装返回结果
             return PresignedUploadPolicy(
                 url=policy_data['url'],

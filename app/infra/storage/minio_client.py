@@ -18,6 +18,7 @@ class MinioClient(StorageClientInterface, ABC):
         self.endpoint_url = self._get_base_url()
         self.bucket_name = self.minio_conf.bucket_name
         self.cdn_base_url = self.minio_conf.cdn_base_url or self.endpoint_url
+        self.public_base_url = self._get_public_base_url()
 
         self.s3 = boto3.client(
             "s3",
@@ -33,6 +34,9 @@ class MinioClient(StorageClientInterface, ABC):
         protocol = "https" if self.minio_conf.secure else "http"
         return f"{protocol}://{self.minio_conf.endpoint}"
 
+    def _get_public_base_url(self) -> str:
+        protocol = "https" if self.minio_conf.secure_cdn else "http"
+        return f"{protocol}://{self.minio_conf.public_endpoint}"
     def build_final_url(self, object_name: str) -> str:
         """构建最终可访问的 URL (可能是 CDN URL)"""
         # 简化 URL 构建逻辑，CDN 逻辑也可以在这里处理
@@ -164,15 +168,26 @@ class MinioClient(StorageClientInterface, ABC):
     ) -> Dict[str, Any]:
         """
         生成带安全策略的预签名POST，用于客户端上传。
+        会智能替换为公网地址。
         """
         try:
-            return self.s3.generate_presigned_post(
+            # 1. Boto3 使用内网 endpoint 生成 policy
+            policy_data = self.s3.generate_presigned_post(
                 Bucket=self.bucket_name,
                 Key=object_name,
                 Fields=fields,
                 Conditions=conditions,
                 ExpiresIn=expires_in
             )
+
+            # 2. 如果配置了公网地址，替换 policy 中的 'url' 字段
+            if self.minio_conf.public_endpoint and 'url' in policy_data:
+                policy_data['url'] = policy_data['url'].replace(
+                    self.endpoint_url, self.public_base_url
+                )
+
+            logger.debug(f"[MinIO] Generated presigned POST policy for {object_name}: {policy_data}")
+            return policy_data
         except ClientError as e:
             logger.error(f"Failed to generate presigned POST policy for {object_name}: {e}")
             raise FileException("Could not generate upload policy.")

@@ -56,6 +56,7 @@ storage_clients:
       secret_key: "${MINIO_SECRET}"
       bucket_name: "${PUBLIC_STORAGE_BUCKET}"
       secure: ${PUBLIC_STORAGE_SECURE}
+      secure_cdn: ${PUBLIC_STORAGE_SECURE_CDN}
       public_endpoint: "${PUBLIC_STORAGE_PUBLIC_ENDPOINT}"
 
 storage_profiles:

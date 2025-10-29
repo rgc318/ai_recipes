@@ -31,7 +31,7 @@ def build_public_storage_url(object_name: Optional[str]) -> Optional[str]:
             return f"{client_params.cdn_base_url.rstrip('/')}/{object_name.lstrip('/')}"
 
         # Determine protocol for non-CDN URLs
-        protocol = "https" if client_params.secure else "http"
+        protocol = "https" if client_params.secure_cdn else "http"
 
         # --- Priority 2: Use Public Endpoint if available ---
         # This is for when the storage is behind a reverse proxy or has a different public URL.
@@ -46,4 +46,42 @@ def build_public_storage_url(object_name: Optional[str]) -> Optional[str]:
         # Handle cases where settings might be missing or misconfigured.
         logger.error(f"Could not build public storage URL due to configuration error: {e}")
         # In a production environment, you might return a default placeholder image URL.
+        return None
+
+
+def build_presigned_base_url(profile_name: str = 'public_cloud_storage') -> Optional[str]:
+    """
+    A utility function to get the correct *base URL* for generating presigned URLs.
+
+    This URL is the endpoint that the *client* (e.g., browser) will use to
+    execute the S3 API operation (e.g., PUT, POST, GET).
+
+    The priority is:
+    1. If 'public_endpoint' is set, use it (e.g., 'https://img.rgcdev.top').
+       This is the standard for services behind a reverse proxy.
+    2. If not, fall back to the main 'endpoint' (e.g., 'http://192.168.31.229:19000').
+       This is common for development or services exposed directly.
+
+    'cdn_base_url' is (and should be) intentionally ignored, as presigned
+    operations must target the S3 API origin, not a cache.
+    """
+    try:
+        # Get the config for the specified storage profile
+        client_params = settings.storage_clients[profile_name].params
+
+        # Determine protocol (this applies to both public and internal endpoints)
+        protocol = "https" if client_params.secure else "http"
+
+        # --- Priority 1: Use Public Endpoint (The main use case) ---
+        if client_params.public_endpoint:
+            # public_endpoint should just be the hostname, e.g., 'img.rgcdev.top'
+            # We strip any trailing slashes just in case
+            return f"{protocol}://{client_params.public_endpoint.rstrip('/')}"
+
+        # --- Priority 2: Fallback to the direct endpoint ---
+        # This is the same URL the backend uses for its internal connection.
+        return f"{protocol}://{client_params.endpoint.rstrip('/')}"
+
+    except (KeyError, AttributeError) as e:
+        logger.error(f"Could not build presigned base URL for profile '{profile_name}' due to config error: {e}")
         return None
