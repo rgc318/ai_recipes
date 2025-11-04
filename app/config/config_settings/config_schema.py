@@ -3,16 +3,78 @@ from typing import Dict, Optional, Literal, Union, List
 from pydantic import BaseModel, Field, model_validator
 
 
-class MinioS3Params(BaseModel):
-    """MinIO 或 AWS S3 类型的客户端参数"""
-    endpoint: Optional[str] = None # S3 不需要 endpoint，MinIO 需要
+class S3Params(BaseModel):
+    """
+    MinIO 或 S3 兼容服务的客户端参数
+    (已增强以适应 AWS S3, MinIO, OSS, COS 等)
+    """
+
+    # --- 核心连接配置 ---
+
+    endpoint: Optional[str] = None
+    """
+    服务地址 (不含 http/https)。
+    - AWS S3: 留空 (None)，Boto3 会根据 region 自动生成。
+    - MinIO/OSS/COS: 必须填写, e.g., 'your-minio:9000' 或 'oss-cn-hangzhou.aliyuncs.com'
+    """
+
+    region: str = "us-east-1"
+    """
+    S3 区域。
+    - MinIO: 可以保留 'us-east-1'。
+    - AWS S3/OSS/COS: 必须填写存储桶所在的实际区域, e.g., 'ap-northeast-1'.
+    """
+
     access_key: str
     secret_key: str
     bucket_name: str
     secure: bool = True
-    cdn_base_url: Optional[str] = None
-    secure_cdn: bool = True
+    """
+    是否使用 HTTPS。
+    - MinIO(本地): 可能是 False
+    - AWS S3/OSS/COS: 必须是 True
+    """
+
+    force_path_style: bool = False
+    """
+    是否强制使用路径样式 (Path-Style) 寻址。
+    - AWS S3: 必须为 False (使用 'bucket.s3.com/key' 样式)。
+    - MinIO: 如果您没有配置虚拟主机，可能需要设为 True (使用 'minio.com/bucket/key' 样式)。
+    """
+
+    default_acl: Optional[str] = "public-read"
+    """
+    上传或复制对象时使用的默认 ACL。
+    - MinIO/OSS: 可能是 'public-read'
+    - AWS S3: 可能是 'private'
+    - Cloudflare R2: 必须设置为 None
+    """
+
+    # --- 公网/CDN 访问配置 ---
+
     public_endpoint: Optional[str] = None
+    """
+    公网访问端点 (不含 http/https, 不含 bucket)。
+    用于替换预签名 POST URL 中的内网 endpoint。
+    e.g., 's3.ap-northeast-1.amazonaws.com' 或 'public-minio-domain.com'
+    """
+
+    cdn_base_url: Optional[str] = None
+    """
+    CDN 完整域名 (不含 http/https, 不含 bucket)。
+    e.g., 'cdn.your-domain.com'
+    """
+
+    secure_cdn: bool = True
+    """CDN 是否使用 HTTPS"""
+
+    # --- (可选) 健壮性配置 ---
+
+    connect_timeout: int = 60
+    """连接超时时间 (秒)"""
+
+    read_timeout: int = 60
+    """读取超时时间 (秒)"""
 
 class AzureBlobParams(BaseModel):
     """Azure Blob Storage 类型的客户端参数 (示例)"""
@@ -20,9 +82,9 @@ class AzureBlobParams(BaseModel):
     bucket_name: str # 在 Azure 中叫 container_name
     cdn_base_url: Optional[str] = None
 
-class MinioClientConfig(BaseModel):
+class S3ClientConfig(BaseModel):
     type: Literal['minio', 's3'] # 限制 type 只能是 'minio' 或 's3'
-    params: MinioS3Params
+    params: S3Params
 
 class AzureClientConfig(BaseModel):
     type: Literal['azure_blob']
@@ -129,7 +191,7 @@ class AppConfig(BaseModel):
     redis: RedisConfig
     # 【新增】将新的配置结构添加到主配置模型中
     # 使用 Union 来支持多种不同的客户端配置结构
-    storage_clients: Dict[str, Union[MinioClientConfig, AzureClientConfig]]
+    storage_clients: Dict[str, Union[S3ClientConfig, AzureClientConfig]]
     storage_profiles: Dict[str, StorageProfileConfig]
 
 

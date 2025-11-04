@@ -4,12 +4,12 @@ from typing import Dict
 from app.config.settings import settings
 from app.config.config_settings.config_schema import (  # 从您的 schemas 文件中导入
     StorageProfileConfig,
-    MinioClientConfig,
+    S3ClientConfig,
     AzureClientConfig,  # 即使尚未实现，也为未来做准备
 )
 from app.core.logger import logger
 from app.infra.storage.storage_interface import StorageClientInterface
-from app.infra.storage.minio_client import MinioClient
+from app.infra.storage.s3_client import S3CompatibleClient
 
 
 # 导入未来可能有的其他客户端
@@ -68,10 +68,10 @@ class StorageFactory:
                 logger.debug(f"Initializing storage client: '{client_name}' of type '{client_config.type}'...")
 
                 # 工厂的核心逻辑：根据类型创建不同的客户端实例
-                if isinstance(client_config, MinioClientConfig):
-                    # Pydantic 已经确保了 client_config.params 是 MinioS3Params 类型
-                    # 假设您的 MinioClient 构造函数接收一个匹配的配置对象
-                    new_client = MinioClient(config=client_config)
+                if isinstance(client_config, S3ClientConfig):
+                    # Pydantic 已经确保了 client_config.params 是 S3Params 类型
+                    # 假设您的 S3CompatibleClient 构造函数接收一个匹配的配置对象
+                    new_client = S3CompatibleClient(config=client_config)
 
                 elif isinstance(client_config, AzureClientConfig):
                     # new_client = AzureBlobClient(config=client_config.params)
