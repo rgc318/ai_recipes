@@ -415,7 +415,7 @@ class FileRecordService(BaseService):
 
         # 2. 【核心】先执行外部I/O操作（移动物理文件）
         # 如果这一步失败，会直接抛出异常，根本不会触及下面的数据库操作，保证了数据一致性。
-        await self.file_service.move_physical_file(
+        await self.file_service.move_file(
             source_key=source_key,
             destination_key=destination_key,
             profile_name=profile_name

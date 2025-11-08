@@ -325,7 +325,7 @@ class RecipeService(BaseService):
         if files_to_move:
             for move_op in files_to_move:
                 try:
-                    await file_service.move_physical_file(
+                    await file_service.move_file(
                         source_key=move_op["source"],
                         destination_key=move_op["dest"],
                         profile_name="recipe_images"

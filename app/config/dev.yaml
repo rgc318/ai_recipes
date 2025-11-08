@@ -103,6 +103,7 @@ storage_clients:
 storage_profiles:
   user_avatars:
     client: "r2_test_storage"
+#    client: "public_cloud_storage"
     default_folder: "avatars/{user_id}"
     max_file_size_mb: 5
     allowed_file_types:
@@ -110,6 +111,7 @@ storage_profiles:
       - "image/png"
       - "image/webp"
     presigned_upload_method: "put_url" # <--- ADDED
+#    presigned_upload_method: "post_policy" # <--- ADDED
 
   secure_reports:
     client: "private_minio"
@@ -120,19 +122,20 @@ storage_profiles:
       - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       - "application/vnd.ms-excel"
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    presigned_upload_method: "post_policy" # <--- ADDED
+    presigned_upload_method: "put_url" # <--- ADDED
+#    presigned_upload_method: "post_policy" # <--- ADDED
 
   recipe_images:
-#    client: "r2_test_storage"
-    client: "public_cloud_storage"
+    client: "r2_test_storage"
+#    client: "public_cloud_storage"
     default_folder: "recipes/{recipe_id}"
     max_file_size_mb: 5
     allowed_file_types:
       - "image/jpeg"
       - "image/png"
       - "image/webp"
-    presigned_upload_method: "post_policy" # <--- ADDED
-#    presigned_upload_method: "put_url" # <--- ADDED
+#    presigned_upload_method: "post_policy" # <--- ADDED
+    presigned_upload_method: "put_url" # <--- ADDED
 
   general_files:
     client: "r2_test_storage"
