@@ -52,16 +52,16 @@ class UserService(BaseService):
     # --- 基础用户查询 ---
 
     # --- 【新增】辅助方法：动态填充 URL ---
-    def _set_full_avatar_url(self, user_orm: User) -> User:
-        """
-        为一个 User ORM 对象实例丰富动态数据，如 avatar_url。
-        注意：这个方法直接修改并返回传入的 ORM 对象。
-        """
-        if user_orm.avatar_url:  # 如果用户有关联的头像 object_name
-            client = self.file_service.factory.get_client_by_profile("user_avatars")
-            # 直接在 ORM 对象实例上附加一个新属性
-            user_orm.avatar_url = client.build_final_url(user_orm.avatar_url)
-        return user_orm
+    # def _set_full_avatar_url(self, user_orm: User) -> User:
+    #     """
+    #     为一个 User ORM 对象实例丰富动态数据，如 avatar_url。
+    #     注意：这个方法直接修改并返回传入的 ORM 对象。
+    #     """
+    #     if user_orm.avatar.url:  # 如果用户有关联的头像 object_name
+    #         client = self.file_service.factory.get_client_by_profile("user_avatars")
+    #         # 直接在 ORM 对象实例上附加一个新属性
+    #         user_orm.avatar_url = client.build_final_url(user_orm.avatar_url)
+    #     return user_orm
 
     async def get_user_by_id(self, user_id: UUID) -> User:
         """根据ID获取用户，未找到则抛出业务异常。"""
@@ -213,7 +213,8 @@ class UserService(BaseService):
                 permanent_path = f"avatars/{new_user.id}/{filename}"
 
                 # 2. 更新数据库记录（仍在事务中）
-                new_user.avatar_url = permanent_path
+                new_user.avatar_file_id = file_record.id
+
                 await self.file_record_service.update_file_record(
                     record_id=file_record.id,
                     record_update=FileRecordUpdate(
@@ -241,6 +242,8 @@ class UserService(BaseService):
                 # 这里可以触发一个后台任务来重试移动，或者发出警报
 
         await self.user_repo.refresh(new_user)
+
+        await self.user_repo.refresh(new_user, attribute_names=["avatar"])
         return new_user
 
     async def update_user(self, user_id: UUID, updates: UserUpdate) -> User:
@@ -427,7 +430,11 @@ class UserService(BaseService):
     # 【新增】一个专门给用户更新自己信息的方法
     async def update_profile(self, user_id: UUID, updates: UserUpdateProfile) -> User:
         """用户更新自己的个人资料，也需要在一个事务中完成。"""
-        user = await self.get_user_by_id(user_id)
+        user = await self.get_user_with_roles(user_id)
+        if not user:
+            # get_user_with_roles 会抛出 UserNotFoundException，
+            # 但为了以防万一，我们还是检查一下
+            raise UserNotFoundException()
         update_data = updates.model_dump(exclude_unset=True)
 
         new_email = update_data.get("email")
@@ -557,11 +564,13 @@ class UserService(BaseService):
 
 
     async def update_avatar(self, user_id: UUID, upload_file: UploadFile) -> User:
-        user = await self.user_repo.get_by_id(user_id)
+        user = await self.user_repo.get_by_id_with_roles_permissions(user_id)
         if not user:
             raise UserNotFoundException()
 
-        old_avatar_object_name = user.avatar_url
+        old_avatar_record: Optional[FileRecord] = user.avatar
+        old_avatar_record_id: Optional[UUID] = old_avatar_record.id if old_avatar_record else None
+        old_avatar_object_name: Optional[str] = old_avatar_record.object_name if old_avatar_record else None
         upload_result = None
 
         # --- 阶段一: 上传新文件到云存储 (外部操作) ---
@@ -574,25 +583,27 @@ class UserService(BaseService):
             raise
 
         # --- 阶段二: 数据库事务 ---
+        new_file_record: Optional[FileRecord] = None
         try:
-            async with self.user_repo.db.begin_nested():  # 使用自动事务块
-                # 1. (软)删除旧的 FileRecord
-                if old_avatar_object_name:
-                    await self._cleanup_old_avatar_records(old_avatar_object_name)
+            async with self.user_repo.db.begin_nested():
+                # 1. 【【【 修正点 】】】 (软)删除旧的 FileRecord (按 ID)
+                if old_avatar_record_id:
+                    await self._cleanup_old_avatar_records(old_avatar_record_id)
 
-                # 2. 创建新的 FileRecord
-                await self.file_record_service.register_uploaded_file(
+                # 2. (不变) 创建新的 FileRecord
+                new_file_record = await self.file_record_service.register_uploaded_file(
                     object_name=upload_result.object_name,
                     original_filename=upload_file.filename,
                     file_size=upload_result.file_size,
                     content_type=upload_result.content_type,
                     profile_name="user_avatars",
-                    uploader_context=UserContext(id=user_id),  # 假设可以这样构建
+                    uploader_context=UserContext(id=user_id),
                     etag=upload_result.etag,
                 )
 
-                # 3. 更新 User 对象
-                user.avatar_url = upload_result.object_name
+                # 3. 【【【 修正点 】】】
+                # 更新 User 的外键
+                user.avatar_file_id = new_file_record.id
                 self.user_repo.db.add(user)
 
         except Exception as e:
@@ -612,32 +623,35 @@ class UserService(BaseService):
                 )
 
         await self.user_repo.refresh(user)
+        await self.user_repo.refresh(user, attribute_names=["avatar"])
         return user
 
-    async def _cleanup_old_avatar_records(self, old_avatar_object_name: str):
+    async def _cleanup_old_avatar_records(self, old_avatar_record_id: Optional[UUID]):
         """
         【职责更明确】一个私有方法，只负责清理与旧头像相关的【数据库记录】。
         它不包含 commit，以便被调用者纳入其自身的事务。
         """
-        if not old_avatar_object_name:
+        if not old_avatar_record_id:
             return
 
         file_record_repo = self.factory.get_repo_by_type(FileRecordRepository)
-        await file_record_repo.soft_delete_by_object_name(old_avatar_object_name)
+        await file_record_repo.soft_delete_by_ids([old_avatar_record_id])
 
     async def link_new_avatar(self, user_id: UUID, avatar_dto: AvatarLinkDTO, user_context: UserContext) -> User:
         """
         原子化地关联一个已通过预签名URL上传的头像（使用 begin_nested 优化）。
         """
         # 1. 获取用户信息，这部分逻辑在事务之外，完全不变
-        user = await self.user_repo.get_by_id(user_id)
+        user = await self.user_repo.get_by_id_with_roles_permissions(user_id)
         if not user:
             raise UserNotFoundException()
 
-        old_avatar_name = user.avatar_url
+        old_avatar_record: Optional[FileRecord] = user.avatar
+        old_avatar_record_id: Optional[UUID] = old_avatar_record.id if old_avatar_record else None
+        old_avatar_object_name: Optional[str] = old_avatar_record.object_name if old_avatar_record else None
         new_avatar_name = avatar_dto.object_name
 
-        if old_avatar_name == new_avatar_name:
+        if old_avatar_object_name == new_avatar_name:
             self.logger.info(f"Avatar for user {user_id} is already set to {new_avatar_name}. No action taken.")
             await self.user_repo.refresh(user)
             return user
@@ -656,9 +670,9 @@ class UserService(BaseService):
                     etag=avatar_dto.etag,
                 )
 
-                await self._cleanup_old_avatar_records(old_avatar_name)
+                await self._cleanup_old_avatar_records(old_avatar_record_id)
 
-                user.avatar_url = new_file_record.object_name
+                user.avatar_file_id = new_file_record.id
                 self.user_repo.db.add(user)
 
                 # 3. 【核心修改】不再需要手动 commit()
@@ -672,13 +686,14 @@ class UserService(BaseService):
             raise e
 
         # 5. 阶段二的外部非事务性操作，完全不变
-        if old_avatar_name:
+        if old_avatar_object_name:
             try:
-                await self.file_service.delete_file(old_avatar_name, profile_name="user_avatars")
+                await self.file_service.delete_file(old_avatar_object_name, profile_name="user_avatars")
             except Exception as e:
-                self.logger.error(f"数据库更新成功，但删除旧的物理头像文件 {old_avatar_name} 失败: {e}")
+                self.logger.error(f"数据库更新成功，但删除旧的物理头像文件 {old_avatar_object_name} 失败: {e}")
 
         await self.user_repo.refresh(user)
+        await self.user_repo.refresh(user, attribute_names=["avatar"])
         return user
 
     async def restore_users(self, user_ids: List[UUID], current_user: UserContext) -> int:
@@ -723,7 +738,7 @@ class UserService(BaseService):
                 user.email = f"{user.id}@deleted.local"
                 user.full_name = "已注销用户"
                 user.phone = None
-                user.avatar_url = None  # 头像的物理文件可在后续清理
+                user.avatar_file_id = None
                 user.hashed_password = get_password_hash(f"locked-{uuid.uuid4()}")  # 设置一个随机且无法登录的密码
 
                 # 锁定账户并标记为非活跃

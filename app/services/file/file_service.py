@@ -2,7 +2,7 @@ import asyncio
 import os
 from asyncio import Semaphore
 from datetime import datetime
-from typing import BinaryIO, List, TYPE_CHECKING, Optional
+from typing import BinaryIO, List, TYPE_CHECKING, Optional, Literal
 from uuid import uuid4, UUID
 
 from botocore.exceptions import ClientError
@@ -12,10 +12,12 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from app.core.exceptions import FileException, NotFoundException
 from app.core.logger import logger
+from app.enums.file_enums import UploadMode
 from app.infra.storage.storage_factory import StorageFactory
 from app.infra.storage.storage_interface import StorageClientInterface
 from app.schemas.file.file_record_schemas import FileRecordRead
-from app.schemas.file.file_schemas import UploadResult, PresignedUploadURL, PresignedUploadPolicy
+from app.schemas.file.file_schemas import UploadResult, PresignedUploadURL, PresignedUploadPolicy, \
+    UnifiedPresignedUpload
 from app.schemas.users.user_context import UserContext
 from app.services._base_service import BaseService
 if TYPE_CHECKING:
@@ -84,15 +86,18 @@ class FileService(BaseService):
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(3), reraise=True)
     async def _safe_upload(
-            self,
-            client: StorageClientInterface,
-            file: BinaryIO,
-            length: int,
-            object_name: str,
-            content_type: str
-    ) -> dict:
+        self,
+        client: StorageClientInterface,
+        file: BinaryIO,
+        length: int,
+        object_name: str,
+        content_type: str
+    ) -> str:  # <-- 【修复】类型提示应为 str
         """内部核心上传方法，带重试。"""
-        logger.info(f"Uploading to {object_name} using client for bucket '{client.bucket_name}'")
+        client_name = client.__class__.__name__  # <-- 【修复】获取客户端类名
+        logger.info(
+            f"Uploading {object_name} using client: {client_name}"
+        )
         try:
             result = await run_in_threadpool(
                 client.put_object,
@@ -101,15 +106,17 @@ class FileService(BaseService):
                 length=length,
                 content_type=content_type,
             )
-            etag = result.get('ETag')
+            etag = (result.get("ETag") or result.get("etag") or "").strip('"')
 
-            logger.info(f"[MinIO] Upload successful for {object_name}")
+
+            logger.info(f"Upload successful for {object_name} (Client: {client_name})")  # <-- 【修复】
             return etag
         except ClientError as e:
-            logger.error(f"[MinIO] Upload failed for {object_name}: {e}")
+            logger.error(f"Upload failed for {object_name} (Client: {client_name}): {e}")  # <-- 【修复】
             raise FileException(message="Upload to object storage failed.")
         except Exception as e:
-            logger.exception(f"[MinIO] Unexpected error during upload for {object_name}: {e}")
+            logger.exception(
+                f"Unexpected error during upload for {object_name} (Client: {client_name}): {e}")  # <-- 【修复】
             raise FileException(message="An unexpected error occurred during upload.")
 
     # --- 公共服务接口 (Public Service API) ---
@@ -391,6 +398,95 @@ class FileService(BaseService):
             logger.error(f"Failed to generate GET URL for {object_name}: {e}")
             raise FileException(message="Could not generate file URL.")
 
+    async def generate_presigned_upload(
+        self,
+        original_filename: str,
+        content_type: str,
+        profile_name: str,
+        expires_in: int = 3600,
+        force_method: Optional[Literal[UploadMode.PUT_URL, UploadMode.POST_POLICY]] = None,
+        **path_params
+    ) -> UnifiedPresignedUpload:
+        """
+        【主方法】根据“业务偏好”智能生成预签名，并在服务不支持时自动降级。
+
+        这是推荐的、供客户端（前端）调用的统一接口。
+        它读取 Profile 的 "presigned_upload_method" 配置，并尝试使用它。
+        如果客户端 (如 R2) 不支持 (抛出 NotImplementedError)，它会自动降级到 'put_url'。
+        """
+
+        final_method = None
+
+        if force_method:
+            # 1a. 优先级 1: 使用“强制覆盖”参数
+            final_method = force_method
+            logger.info(f"Forced upload method '{final_method}' for profile '{profile_name}'.")
+        else:
+            # 1b. 优先级 2: 使用“配置偏好”
+            profile_config = self.factory.get_profile_config(profile_name)
+            final_method = getattr(profile_config, 'presigned_upload_method', UploadMode.PUT_URL)
+
+        # 3. 【Try-Except-Fallback 逻辑】
+        # 尝试执行“偏好”的方法
+        if final_method == UploadMode.POST_POLICY:
+            try:
+                # 3a. 尝试 POST (e.g., for S3/MinIO)
+                policy_data = await self.generate_presigned_upload_policy(
+                    original_filename=original_filename,
+                    content_type=content_type,
+                    profile_name=profile_name,
+                    expires_in=expires_in,
+                    **path_params
+                )
+
+                # 适配为统一响应
+                return UnifiedPresignedUpload(
+                    method="POST",
+                    upload_url=policy_data.url,
+                    fields=policy_data.fields,
+                    object_name=policy_data.object_name,
+                    final_url=policy_data.final_url
+                )
+
+            except (NotImplementedError, ClientError) as e:
+                # 3b. 【自动降级】
+                # 捕获 s3_client (R2) 抛出的 NotImplementedError 或 ClientError
+                # 【关键】检查失败的原因：
+                if final_method == UploadMode.POST_POLICY:
+                    # 如果是“强制 POST”失败了（例如R2），则必须抛出异常
+                    # 因为调用者明确要求了POST，不能自动降级
+                    logger.error(f"Forced 'post_policy' failed for profile '{profile_name}': {e}")
+                    raise FileException(
+                        f"Forced 'post_policy' is not supported by the provider for profile '{profile_name}'."
+                    )
+
+                # 如果是“默认 POST”失败了（例如R2），则可以自动降级为PUT
+                logger.warning(
+                    f"Profile '{profile_name}' prefers 'post_policy', but client does not support it. "
+                    f"Falling back to 'put_url'. Error: {e}"
+                )
+                # 代码会“掉落”到下面的 "put_url" 逻辑
+
+        # 4. (默认或降级) 执行 "put_url"
+        # (如果 preferred_method 一开始就是 "put_url"，会直接到这里)
+        # (如果 preferred_method 是 "post_policy" 但失败了，也会到这里)
+
+        put_data = await self.generate_presigned_put_url(
+            original_filename=original_filename,
+            profile_name=profile_name,
+            expires_in=expires_in,
+            **path_params
+        )
+
+        # 适配为统一响应
+        return UnifiedPresignedUpload(
+            method="PUT",
+            upload_url=put_data.upload_url,
+            fields=None,  # PUT 模式没有 fields
+            object_name=put_data.object_name,
+            final_url=put_data.url
+        )
+
     # 【补全】生成预签名上传URL的功能
     async def generate_presigned_put_url(
             self,
@@ -453,6 +549,7 @@ class FileService(BaseService):
         conditions = []
         fields = {"Content-Type": content_type}
 
+
         # 策略 a: 限制文件大小
         max_size_mb = getattr(profile_config, 'max_file_size_mb', 10)
         max_size_bytes = max_size_mb * 1024 * 1024
@@ -485,7 +582,7 @@ class FileService(BaseService):
             logger.error(f"Failed to generate POST Policy for {object_name}: {e}")
             raise FileException(message="Could not generate upload policy.")
 
-    async def move_physical_file(
+    async def move_file(
             self,
             source_key: str,
             destination_key: str,
@@ -524,3 +621,22 @@ class FileService(BaseService):
             logger.exception(f"Unexpected error during file move: {e}")
             raise FileException(message="An unexpected error occurred during file move.")
 
+    def build_url_for_object(
+        self,
+        object_name: Optional[str],
+        profile_name: Optional[str]
+    ) -> Optional[str]:
+        """
+        一个可复用的、安全的 URL 构建器。
+        它拥有所有上下文（通过 self.factory）。
+        """
+        if not object_name or not profile_name:
+            return None
+        try:
+            # 1. 从 Factory 获取“智能”客户端
+            client = self.factory.get_client_by_profile(profile_name)
+            # 2. 调用客户端的“智能” URL 构建器
+            return client.build_final_url(object_name)
+        except Exception as e:
+            logger.error(f"Failed to build URL for {object_name} in profile {profile_name}: {e}")
+            return None

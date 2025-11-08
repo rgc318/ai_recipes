@@ -1,12 +1,17 @@
 # app/core/security.py
+from typing import Optional
 from uuid import UUID
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 
+from app.api.dependencies.service_getters.common_service_getter import get_file_service
 from app.api.dependencies.service_getters.users_service_getter import get_user_service
+from app.core.logger import logger
 from app.core.exceptions import InvalidTokenException
 from app.schemas.users.user_context import UserContext
+from app.services.file import file_service
+from app.services.file.file_service import FileService
 from app.utils.jwt_utils import decode_token, validate_token_type
 
 # 2. 【核心修改】直接导入 Service “类” 和它需要的依赖
@@ -17,6 +22,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     user_service: UserService = Depends(get_user_service),
+    file_service: FileService = Depends(get_file_service),
 ) -> UserContext:
     payload = await decode_token(token)
     user_id: str = payload.get("sub")
@@ -30,8 +36,15 @@ async def get_current_user(
     if not user or not user.is_active:
         raise InvalidTokenException(message="User not found or is inactive")
 
-        # 1. 从 User ORM 对象中提取基础信息
-        #    model_dump() 会将 user 对象的基础属性转为字典
+    # 4. 【【【核心修复】】】
+    # 在 Service/Dependency 层面构建 URL，而不是在 Schema 层面
+    # avatar_full_url = file_service.build_url_for_object(
+    #     object_name=user.avatar_url,
+    #     profile_name="user_avatars"  # 我们硬编码知道头像 profile
+    # )
+
+    # 1. 从 User ORM 对象中提取基础信息
+    #    model_dump() 会将 user 对象的基础属性转为字典
     user_data = user.model_dump()
 
     # 2. 手动将 Role 对象列表 转换为 角色代码的字符串列表
@@ -41,6 +54,8 @@ async def get_current_user(
     # 3. 直接使用 User 模型上已经计算好的权限集合
     #    user.permissions 返回的是一个 set，我们将其转为 list 以匹配 UserContext 定义
     user_data['permissions'] = list(user.permissions)
+
+    user_data['avatar'] = user.avatar
 
     # 4. 用准备好的、结构完全匹配的数据字典来创建 UserContext 实例
     #    这里的 **user_data 会将字典解包成关键字参数

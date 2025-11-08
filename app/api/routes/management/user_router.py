@@ -7,8 +7,9 @@ from app.api.dependencies.permissions import require_superuser
 from app.core.exceptions import UnauthorizedException, BaseBusinessException, PermissionDeniedException
 from app.core.security.security import get_current_user
 from app.enums.query_enums import ViewMode
-from app.schemas.file.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, PresignedUploadPolicy, \
-    PresignedPolicyRequest
+from app.schemas.file.file_schemas import PresignedUploadURL, PresignedAvatarRequest, AvatarLinkDTO, \
+    PresignedUploadPolicy, \
+    PresignedPolicyPayload, UnifiedPresignedUpload, PresignedPolicyAvatarPayload
 from app.schemas.users.user_context import UserContext
 from app.services.file.file_service import FileService
 from app.services.users.user_service import UserService
@@ -120,49 +121,35 @@ async def update_my_avatar(
 
     return response_success(data=UserRead.model_validate(updated_user), message="头像更新成功")
 
-@router.post(
-    "/me/avatar/generate-upload-url",
-    response_model=StandardResponse[PresignedUploadURL], # 复用您已有的Schema
-    summary="为上传新头像生成预签名URL"
-)
-async def generate_avatar_upload_url(
-    payload: PresignedAvatarRequest,
-    current_user: UserContext = Depends(get_current_user),
-    file_service: FileService = Depends(get_file_service) # 假设依赖注入函数已存在
-):
-    """
-    第一步：客户端调用此接口获取一个用于直接上传文件的预签名URL。
-    """
-    # 调用您已有的FileService方法来生成URL
-    # 我们将user_id作为路径参数，以保持存储结构的整洁
-    presigned_data = await file_service.generate_presigned_put_url(
-        profile_name="user_avatars",
-        original_filename=payload.original_filename,
-        user_id=str(current_user.id) # 路径参数
-    )
-    return response_success(data=presigned_data)
-
 
 @router.post(
-    "/me/avatar/generate-upload-policy",
-    response_model=StandardResponse[PresignedUploadPolicy],
-    summary="【安全模式】为上传新头像生成预签名POST策略 (推荐)"
+    "/me/avatar/generate-credential",  # <-- 新的统一路径
+    response_model=StandardResponse[UnifiedPresignedUpload],  # <-- 返回统一模型
+    summary="【推荐】为上传新头像智能生成凭证 (PUT或POST)"
 )
-async def generate_avatar_upload_policy(
-    payload: PresignedPolicyRequest, # 【修改】使用新的请求体模型
+async def generate_avatar_upload_credential(
+    payload: PresignedPolicyAvatarPayload,  # <-- 复用这个模型, 它有 content_type
     current_user: UserContext = Depends(get_current_user),
     file_service: FileService = Depends(get_file_service)
 ):
     """
-    第一步（安全模式）：客户端调用此接口获取一个带安全策略的、用于POST上传的凭证。
+    第一步（智能模式）：客户端调用此接口获取一个用于直接上传文件的凭证。
+    后端会自动决定使用 PUT 还是 POST，并在 R2 等不支持 POST 的服务上自动降级。
     """
-    policy_data = await file_service.generate_presigned_upload_policy(
-        profile_name="user_avatars",
+
+    avatar_path_params = {"user_id": str(current_user.id)}
+
+    # 【正确】路由层调用“大脑”（generate_presigned_upload）
+    credential_data = await file_service.generate_presigned_upload(
+        profile_name="user_avatars",  # 1. 路由层硬编码“业务场景”
         original_filename=payload.original_filename,
-        content_type=payload.content_type, # 【修改】传入 content_type
-        user_id=str(current_user.id)
+        content_type=payload.content_type,
+        expires_in=payload.expires_in,  # (可选，可以从 payload 传)
+
+        # 2. 路由层硬编码“路径参数”，确保文件存放在用户自己的目录下
+        **avatar_path_params
     )
-    return response_success(data=policy_data)
+    return response_success(data=credential_data)
 
 # 【新增】预签名流程的闭环接口
 @router.patch(
@@ -228,26 +215,27 @@ async def change_current_user_password(
 # 【新增】管理员为指定用户生成头像上传策略
 @router.post(
     "/{user_id}/avatar/generate-upload-policy",
-    response_model=StandardResponse[PresignedUploadPolicy],
+    response_model=StandardResponse[UnifiedPresignedUpload],
     summary="【管理员】为指定用户生成头像上传策略",
     dependencies=[Depends(require_superuser)] # 确保只有超级管理员可以操作
 )
 async def admin_generate_avatar_upload_policy(
     user_id: UUID, # 从路径中获取目标用户ID
-    payload: PresignedPolicyRequest,
+    payload: PresignedPolicyAvatarPayload,
     file_service: FileService = Depends(get_file_service)
 ):
     """
     第一步（管理员模式）：为指定用户上传新头像做准备，获取一个带安全策略的上传凭证。
     """
-    policy_data = await file_service.generate_presigned_upload_policy(
-        profile_name="user_avatars",
+    credential_data = await file_service.generate_presigned_upload(
+        profile_name="user_avatars",  # 1. 路由层硬编码“业务场景”
         original_filename=payload.original_filename,
         content_type=payload.content_type,
+        expires_in=payload.expires_in,  # (可选，可以从 payload 传)
         # 可以将 user_id 作为路径参数，让存储结构更清晰
         user_id=str(user_id)
     )
-    return response_success(data=policy_data)
+    return response_success(data=credential_data)
 
 
 # 【新增】管理员关联已上传的头像

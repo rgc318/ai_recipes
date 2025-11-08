@@ -3,6 +3,8 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field, computed_field
 
+from app.core.logger import logger
+from app.infra.storage.storage_factory import storage_factory
 from app.utils.url_builder import build_public_storage_url
 
 
@@ -27,18 +29,37 @@ class FileRecordRead(BaseModel):
     # 【新增】将 etag 暴露给 API (可选)
     etag: Optional[str] = Field(None, description="文件在对象存储中的 ETag")
 
+    # url: Optional[str] = Field(None, description="文件的完整可访问 URL")
+
     # 我们可以额外添加一个由 Service 层动态生成的 url 字段
+    # @computed_field
+    # @property
+    # def url(self) -> Optional[str]:
+    #     """
+    #     动态生成此文件记录的完整可访问URL。
+    #     """
+    #     # 假设所有通过这个 Schema 返回的都是公开文件
+    #     # 如果需要区分公开/私有，可以在这里加入更多逻辑
+    #     if self.object_name:
+    #         return build_public_storage_url(self.object_name)
+    #     return None
+
     @computed_field
     @property
     def url(self) -> Optional[str]:
         """
         动态生成此文件记录的完整可访问URL。
         """
-        # 假设所有通过这个 Schema 返回的都是公开文件
-        # 如果需要区分公开/私有，可以在这里加入更多逻辑
-        if self.object_name:
-            return build_public_storage_url(self.object_name)
-        return None
+        if not self.object_name or not self.profile_name:
+            return None
+        try:
+            # 1. 它不再需要 Depends()
+            # 2. 它直接使用导入的全局 factory
+            client = storage_factory.get_client_by_profile(self.profile_name)
+            return client.build_final_url(self.object_name)
+        except Exception as e:
+            logger.error(f"Failed to build URL for {self.object_name}: {e}")
+            return None  # 失败时安全返回 null
 
     # 允许从 ORM 对象模型进行转换
     model_config = {

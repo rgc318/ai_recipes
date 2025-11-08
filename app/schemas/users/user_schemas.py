@@ -4,7 +4,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_validator, computed_field
 
+from app.core.logger import logger
 from app.enums.auth_method import AuthMethod
+from app.infra.storage.storage_factory import storage_factory
+from app.schemas.file.file_record_schemas import FileRecordRead
 from app.schemas.users.role_schemas import RoleRead
 from app.utils.url_builder import build_public_storage_url
 
@@ -73,7 +76,7 @@ class UserRead(BaseModel):
     email: Optional[str]
     phone: Optional[str]
     full_name: Optional[str]
-    avatar_url: Optional[str]
+    avatar: Optional[FileRecordRead] = None
     is_active: bool
     is_superuser: bool
     is_verified: bool
@@ -87,14 +90,16 @@ class UserRead(BaseModel):
     @property
     def full_avatar_url(self) -> Optional[str]:
         """
-        动态生成完整的、可公开访问的头像URL。
-        这个字段只在序列化（返回给前端）时存在。
+        动态生成前端需要的完整头像URL。
+        它利用内部 'avatar' (FileRecordRead DTO) 字段的 'url' 属性。
         """
-        # 它的值来源于同一个实例的 avatar_url (object_name) 字段
-        if self.avatar_url:
-            return build_public_storage_url(self.avatar_url)
-        return None
+        # 假设 FileRecordRead 已经有一个 .url 属性 (如上所示)
+        if self.avatar and self.avatar.url:
+            return self.avatar.url
 
+        # 如果 self.avatar 是 None, 或者 self.avatar.url 是 None,
+        # 最终都返回 null，这正是前端想要的
+        return None
 
     model_config = {
         "from_attributes": True

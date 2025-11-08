@@ -2,6 +2,54 @@ from typing import Dict, Optional, Literal, Union, List
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.enums.file_enums import UploadMode
+
+
+class StorageCapabilities(BaseModel):
+    """
+    描述对象存储服务的特性与能力集。
+    【修改】默认值已设为代表一个“功能齐全”的 S3 兼容服务 (如 MinIO, AWS S3)。
+    """
+
+    upload_modes: List[UploadMode] = Field(  # <-- 2. 使用 Enum
+        default_factory=lambda: [
+            UploadMode.PUT_URL,
+            UploadMode.POST_POLICY,
+            UploadMode.MULTIPART
+        ],
+        description="支持的上传模式"
+    )
+
+    supports_acl: bool = Field(
+        default=True,
+        description="是否支持对象 ACL 控制 (S3/MinIO: True, R2: False)"
+    )
+
+    supports_bucket_creation: bool = Field(
+        default=True,
+        description="是否允许通过API创建bucket (S3/MinIO: True, R2: True)"
+    )
+
+    supports_cdn_rewrite: bool = Field(
+        default=True,
+        description="是否支持将内网URL重写为CDN URL (这是一个客户端特性，默认开启)"
+    )
+
+    # ✅ 【【【 核心修复：添加这个新标识 】】】
+    rewrite_presigned_host: bool = Field(
+        default=False,  # 默认值设为 False，因为云服务商 (S3, R2) 不需要重写
+        description="是否应将 Boto3 生成的预签名 URL 的 host 替换为 public_endpoint (仅 MinIO 等内网部署需要)"
+    )
+
+    signature_version: Literal["v2", "v4"] = Field(
+        default="v4",
+        description="支持的签名算法版本 (v4 是现代标准)"
+    )
+
+    path_style: Literal["auto", "path", "virtual"] = Field(
+        default="auto",
+        description="默认寻址风格 (auto 适用于 S3/R2，本地 MinIO 可能需要手动设为 'path')"
+    )
 
 class S3Params(BaseModel):
     """
@@ -35,12 +83,12 @@ class S3Params(BaseModel):
     - AWS S3/OSS/COS: 必须是 True
     """
 
-    force_path_style: bool = False
-    """
-    是否强制使用路径样式 (Path-Style) 寻址。
-    - AWS S3: 必须为 False (使用 'bucket.s3.com/key' 样式)。
-    - MinIO: 如果您没有配置虚拟主机，可能需要设为 True (使用 'minio.com/bucket/key' 样式)。
-    """
+    # force_path_style: bool = False
+    # """
+    # 是否强制使用路径样式 (Path-Style) 寻址。
+    # - AWS S3: 必须为 False (使用 'bucket.s3.com/key' 样式)。
+    # - MinIO: 如果您没有配置虚拟主机，可能需要设为 True (使用 'minio.com/bucket/key' 样式)。
+    # """
 
     default_acl: Optional[str] = "public-read"
     """
@@ -75,6 +123,12 @@ class S3Params(BaseModel):
 
     read_timeout: int = 60
     """读取超时时间 (秒)"""
+
+    capabilities: StorageCapabilities = Field(
+        default_factory=StorageCapabilities,
+        description="描述当前存储服务的特性与行为差异"
+    )
+
 
 class AzureBlobParams(BaseModel):
     """Azure Blob Storage 类型的客户端参数 (示例)"""
@@ -177,6 +231,10 @@ class StorageProfileConfig(BaseModel):
     # 【核心新增】为每个profile定义最大文件大小
     max_file_size_mb: int = Field(10, description="该策略允许的最大文件大小 (MB)，默认为10MB")
 
+    presigned_upload_method: UploadMode = Field(  # <-- 3. 使用 Enum
+        UploadMode.PUT_URL,  # 默认偏好 "put_url"
+        description="此业务场景【首选】的预签名上传方法。"
+    )
 
 # ========================================================================================
 #

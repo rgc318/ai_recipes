@@ -13,6 +13,7 @@ from app.core.exceptions import NotFoundException, ConcurrencyConflictException
 from app.core.exceptions.base_exception import PermissionDeniedException
 from app.enums.query_enums import ViewMode
 from app.infra.db.repository_factory_auto import RepositoryFactory
+from app.infra.storage.storage_factory import StorageFactory
 from app.models.common.category_model import RecipeCategoryLink
 from app.models.files.file_record import FileRecord
 from app.models.recipes.recipe import Recipe, RecipeIngredient, RecipeTagLink, RecipeStep, RecipeStepImageLink, \
@@ -40,10 +41,13 @@ class RecipeService(BaseService):
     def __init__(
             self,
             factory: RepositoryFactory,
+            # storage_factory: StorageFactory,
             current_user: Optional[UserContext] = None,
+
     ):
         super().__init__()
         self.factory = factory
+        # self.storage_factory = storage_factory
         self.current_user = current_user
         # 从工厂获取所有需要的 Repository 实例
         self.recipe_repo: RecipeRepository = factory.get_repo_by_type(RecipeRepository)

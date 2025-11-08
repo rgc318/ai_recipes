@@ -79,7 +79,7 @@ storage_profiles:
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
   recipe_images:
-    client: "public_cloud_storage"
+    client: "r2_test_storage"
     default_folder: "recipes/{recipe_id}"
     max_file_size_mb: 5
     allowed_file_types:

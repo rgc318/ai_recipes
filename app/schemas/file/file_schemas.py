@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 
 
 class FileUploadResponse(BaseModel):
@@ -71,6 +71,38 @@ class RecipeImageLinkDTO(FileLinkBaseDTO):
     pass
 
 
+class UnifiedPresignedUpload(BaseModel):
+    """
+    【推荐】一个统一的预签名上传响应模型。
+
+    它整合了 PUT 和 POST 两种模式，前端（如 vben-admin）可以
+    根据 'method' 字段的值，来决定是执行 PUT 还是 POST 上传。
+    """
+
+    method: Literal["PUT", "POST"] = Field(
+        ...,
+        description="客户端应使用的 HTTP 上传方法。"
+    )
+
+    upload_url: str = Field(
+        ...,
+        description="客户端必须向此 URL 提交上传请求。"
+    )
+
+    fields: Optional[Dict[str, Any]] = Field(
+        None,
+        description="仅在 method 为 'POST' 时存在。包含构建 multipart/form-data 所需的表单字段。"
+    )
+
+    object_name: str = Field(
+        ...,
+        description="文件上传后在对象存储中的唯一路径/键。"
+    )
+
+    final_url: str = Field(
+        ...,
+        description="文件上传成功后的最终可公开访问 URL。"
+    )
 
 class PresignedAvatarRequest(BaseModel):
     original_filename: str
@@ -126,6 +158,12 @@ class RegisterFilePayload(BaseModel):
 
 class PresignedPolicyPayload(BaseModel):
     profile_name: str = Field(..., description="在配置中定义的 Profile 名称。")
+    original_filename: str = Field(..., description="待上传文件的原始名称。")
+    content_type: str = Field(..., description="待上传文件的MIME类型, e.g., 'image/jpeg'。")
+    path_params: Optional[dict] = Field(default_factory=dict, description="用于格式化路径的动态参数。")
+    expires_in: int = Field(3600, description="URL 有效期（秒）。")
+
+class PresignedPolicyAvatarPayload(BaseModel):
     original_filename: str = Field(..., description="待上传文件的原始名称。")
     content_type: str = Field(..., description="待上传文件的MIME类型, e.g., 'image/jpeg'。")
     path_params: Optional[dict] = Field(default_factory=dict, description="用于格式化路径的动态参数。")

@@ -47,7 +47,15 @@ class FileRecord(BaseModel, table=True):
         description="上传时使用的 Storage Profile 名称"
     )
 
-    uploader: "User" = Relationship(back_populates="uploaded_files")
+    uploader: "User" = Relationship(
+        back_populates="uploaded_files",
+
+        # 【【【 在这里添加修复 】】】
+        # 显式告诉 SQLAlchemy，这个关系只使用 uploader_id 这个外键
+        sa_relationship_kwargs={
+            "foreign_keys": "[FileRecord.uploader_id]"
+        }
+    )
 
     # __table_args__ = (
     #     Index(

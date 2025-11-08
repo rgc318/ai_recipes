@@ -159,3 +159,6 @@ class StorageFactory:
 
 # 在应用启动的某个中心位置（如 main.py 或一个专门的 app_setup.py）创建全局实例
 storage_factory = StorageFactory()
+
+def get_storage_factory() -> StorageFactory:
+    return storage_factory

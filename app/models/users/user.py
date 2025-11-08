@@ -56,7 +56,7 @@ class Role(BaseModel, table=True):
     #         postgresql_where=(Column("is_deleted") == False)
     #     ),
     # )
-    __table_args__ = BaseModel.soft_unique_index("code")
+    # __table_args__ = BaseModel.soft_unique_index("code")
 
     @declared_attr
     def __table_args__(cls):
@@ -101,7 +101,14 @@ class User(BaseModel, table=True):
     phone: Optional[str] = Field(default=None, index=True, )
 
     full_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    # ✅ 【【【 核心修复 #2：添加外键和关系 】】】
+    avatar_file_id: Optional[UUID] = Field(default=None, foreign_key="file_record.id")
+
+    avatar: Optional["FileRecord"] = Relationship(
+        sa_relationship_kwargs={
+            "primaryjoin": "and_(User.avatar_file_id == FileRecord.id, FileRecord.is_deleted == False)",
+        }
+    )
 
     hashed_password: str = Field(nullable=False)
     auth_method: AuthMethod = Field(default=AuthMethod.app,nullable=True)  # ✅ 新增

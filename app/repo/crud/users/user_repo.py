@@ -39,7 +39,10 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         stmt = (
             self._base_stmt()
             .where(self.model.id == user_id)
-            .options(selectinload(self.model.roles).selectinload(Role.permissions))
+            .options(
+                selectinload(self.model.roles).selectinload(Role.permissions),
+                selectinload(self.model.avatar)
+            )
         )
         result = await self.db.execute(stmt)
         return result.unique().scalar_one_or_none()
@@ -304,7 +307,8 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
 
         # 3. 定义需要“预加载”的关联数据
         eager_loading_options = [
-            selectinload(self.model.roles).selectinload(Role.permissions)
+            selectinload(self.model.roles).selectinload(Role.permissions),
+            selectinload(self.model.avatar)
         ]
 
         # 4. 调用父类的、完全通用的分页方法，并传入预处理过的参数

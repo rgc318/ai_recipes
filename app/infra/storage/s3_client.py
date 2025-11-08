@@ -1,6 +1,8 @@
 import json
 from abc import ABC
 from typing import BinaryIO, List, Dict, Optional, Any
+from urllib.parse import urlparse, urlunparse
+
 from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 import boto3
@@ -15,16 +17,30 @@ from app.utils.url_builder import build_public_storage_url
 class S3CompatibleClient(StorageClientInterface, ABC):
     def __init__(self, config: S3ClientConfig):
         self.s3_conf = config.params
+        self.capabilities = self.s3_conf.capabilities  # <-- 【修改】直接获取 capabilities 对象
         self.endpoint_url = self._get_base_url()
         self.bucket_name = self.s3_conf.bucket_name
-        self.cdn_base_url = self.s3_conf.cdn_base_url or self.endpoint_url
         self.public_base_url = self._get_public_base_url()
 
-        # 【修改】创建功能更全的 BotoConfig
-        addressing_style = 'path' if self.s3_conf.force_path_style else 'virtual'
+        # 【修改】我们不再从 s3_conf 直接读取 cdn_base_url，
+        # 因为它应该由 build_final_url 结合 capabilities 智能处理
+        # self.cdn_base_url = self.s3_conf.cdn_base_url or self.endpoint_url
+
+        # 【修改】根据 StorageCapabilities 智能设置 BotoConfig
+        # 1. 翻译寻址风格 (Path Style)
+        # Boto3 接受: 'auto' (None), 'path', 'virtual'
+        addressing_style = self.capabilities.path_style
+        if addressing_style == 'auto':
+            addressing_style = None  # Boto3 的 'auto' 对应的是 None
+
+        # 2. 翻译签名版本
+        # Pydantic: "v4" -> Boto3: "s3v4"
+        # Pydantic: "v2" -> Boto3: "s3" (legacy)
+        signature_version_map = {"v4": "s3v4", "v2": "s3"}
+        signature_version = signature_version_map.get(self.capabilities.signature_version, "s3v4")
 
         client_config = BotoConfig(
-            signature_version="s3v4",
+            signature_version=signature_version,
             s3={'addressing_style': addressing_style},
             connect_timeout=self.s3_conf.connect_timeout,
             read_timeout=self.s3_conf.read_timeout
@@ -32,14 +48,19 @@ class S3CompatibleClient(StorageClientInterface, ABC):
 
         self.s3 = boto3.client(
             "s3",
-            endpoint_url=self.endpoint_url,  # (可能为 None, 适配 AWS S3)
+            endpoint_url=self.endpoint_url,
             aws_access_key_id=self.s3_conf.access_key,
             aws_secret_access_key=self.s3_conf.secret_key,
             config=client_config,  # 传入增强的 BotoConfig
-            region_name=self.s3_conf.region  # 传入配置的 Region
+            region_name=self.s3_conf.region
         )
 
-        self.create_bucket_if_not_exists(self.bucket_name)
+        # 【修改】仅在 capabilities 允许时才尝试创建 Bucket
+        if self.capabilities.supports_bucket_creation:
+            self.create_bucket_if_not_exists(self.bucket_name)
+        else:
+            logger.debug(
+                f"[S3 Driver] Skipping bucket check/creation for '{self.bucket_name}' (disabled by capabilities).")
 
     def _get_base_url(self) -> Optional[str]:
         # 【修改】适配 s3_conf 并处理 endpoint 为 None 的情况 (AWS S3)
@@ -56,9 +77,19 @@ class S3CompatibleClient(StorageClientInterface, ABC):
         return f"{protocol}://{self.s3_conf.public_endpoint}"
 
     def build_final_url(self, object_name: str) -> str:
-        """构建最终可访问的 URL (可能是 CDN URL)"""
-        # 简化 URL 构建逻辑，CDN 逻辑也可以在这里处理
-        return build_public_storage_url(object_name)
+        """
+        构建最终可访问的 URL (可能是 CDN URL)
+        【修改】将 client 的所有上下文传递给 URL 构建器
+        """
+        # 【修改】将 S3Client 实例所拥有的所有上下文传递给 utility 函数
+        return build_public_storage_url(
+            object_name=object_name,
+            cdn_base_url=self.s3_conf.cdn_base_url,
+            public_base_url=self.public_base_url,  # 来自 S3Params.public_endpoint
+            internal_base_url=self.endpoint_url,  # 【新增】来自 S3Params.endpoint
+            bucket_name=self.bucket_name,
+            capabilities=self.capabilities  # 传递完整的 capabilities
+        )
 
     def put_object(self, object_name: str, data: BinaryIO, length: int, content_type: str, acl: str = "USE_CONFIG"):
         """底层 put_object 方法"""
@@ -74,11 +105,11 @@ class S3CompatibleClient(StorageClientInterface, ABC):
         else:
             final_acl = self.s3_conf.default_acl  # 从配置中读取
 
-        if final_acl:
+        if self.capabilities.supports_acl and final_acl:
             extra_args["ACL"] = final_acl
             logger.debug(f"[S3 Driver] Applying ACL '{final_acl}' for {object_name}.")
         else:
-            logger.debug(f"[S3 Driver] No ACL will be applied for {object_name} (config is None or R2).")
+            logger.debug(f"[S3 Driver] No ACL will be applied for {object_name} (not supported or not configured).")
 
         # 使用 upload_fileobj 更强大
         self.s3.upload_fileobj(
@@ -158,8 +189,12 @@ class S3CompatibleClient(StorageClientInterface, ABC):
             else:
                 final_acl = self.s3_conf.default_acl  # 从配置中读取
 
-            if final_acl:
+            if self.capabilities.supports_acl and final_acl:
                 params["ACL"] = final_acl
+                logger.debug(f"[S3 Driver] Applying ACL '{final_acl}' for copied object {destination_key}.")
+            else:
+                logger.debug(
+                    f"[S3 Driver] No ACL will be applied for copy to {destination_key} (not supported or not configured).")
 
             # 执行复制
             response = self.s3.copy_object(**params)
@@ -183,12 +218,45 @@ class S3CompatibleClient(StorageClientInterface, ABC):
         return self.s3.head_object(Bucket=self.bucket_name, Key=object_name)
 
     def get_presigned_url(self, client_method: str, object_name: str, expires_in: int):
-        """底层生成预签名 URL 的方法"""
-        return self.s3.generate_presigned_url(
+        """
+        底层生成预签名 URL 的方法 (用于 GET 或 PUT)。
+        会智能地将 Boto3 生成的 URL 替换为 public_endpoint (自定义域)。
+        """
+
+        # 1. Boto3 使用后端 endpoint (内网或公网) 生成 URL
+        presigned_url = self.s3.generate_presigned_url(
             ClientMethod=client_method,
             Params={"Bucket": self.bucket_name, "Key": object_name},
             ExpiresIn=expires_in
         )
+
+        # 2. ✅ 【【【 核心修复：应用与 POST 相同的逻辑 】】】
+        # 检查是否 *需要* (e.g., MinIO) 且 *能够* (有 public_base_url) 重写
+        if (
+            self.capabilities.rewrite_presigned_host
+            and self.public_base_url
+        ):
+            logger.debug(f"[S3 Driver] Rewriting {client_method} URL host using public_endpoint.")
+            try:
+                original_parts = urlparse(presigned_url)  # e.g., http://192.168.1.10:9000/...
+                public_parts = urlparse(self.public_base_url)  # e.g., https://img.rgcdev.top
+
+                new_parts = (
+                    public_parts.scheme,  # https
+                    public_parts.netloc,  # img.rgcdev.top
+                    original_parts.path,  # /public-assets-bucket/object-name
+                    original_parts.params,
+                    original_parts.query,  # ...?AWSAccessKeyId=...
+                    original_parts.fragment
+                )
+                presigned_url = urlunparse(new_parts)
+
+            except Exception as e:
+                logger.error(f"[S3 Driver] Failed to parse and rewrite {client_method} URL: {e}")
+                # 不抛出异常, 最坏情况是使用 boto3 的内网 URL
+
+        # (如果 R2, rewrite_presigned_host=False, 这一步会被跳过, presigned_url 保持 boto3 原样)
+        return presigned_url
 
     def generate_presigned_post_policy(
         self,
@@ -199,10 +267,10 @@ class S3CompatibleClient(StorageClientInterface, ABC):
     ) -> Dict[str, Any]:
         """
         生成带安全策略的预签名POST，用于客户端上传。
-        会智能替换为公网地址。
+        会智能地将 Boto3 生成的 URL 替换为 public_endpoint (自定义域)。
         """
         try:
-            # 1. Boto3 使用内网 endpoint 生成 policy
+            # 1. Boto3 使用后端 endpoint 生成 policy
             policy_data = self.s3.generate_presigned_post(
                 Bucket=self.bucket_name,
                 Key=object_name,
@@ -211,21 +279,47 @@ class S3CompatibleClient(StorageClientInterface, ABC):
                 ExpiresIn=expires_in
             )
 
-            # 【修改】更安全的 URL 替换逻辑
-            # 仅当配置了 public_endpoint 并且我们有一个 internal endpoint (self.endpoint_url)
-            # 可供替换时，才执行替换。
-            # 如果 endpoint_url 为 None (例如 AWS S3), Boto3 会自动生成正确的公网 URL，无需替换。
-            if self.s3_conf.public_endpoint and self.endpoint_url and 'url' in policy_data:
-                policy_data['url'] = policy_data['url'].replace(
-                    self.endpoint_url, self.public_base_url
-                )
-                logger.debug(f"[S3 Driver] Replaced internal endpoint with public endpoint for POST policy.")
-            elif not self.endpoint_url:
-                logger.debug(f"[S3 Driver] Boto3 generated public URL for POST policy, no replacement needed.")
+            # 2. 【修改】根据 capability 智能重写 POST URL
+            # 只有在服务商支持(e.g. R2)且配置了 public_base_url 时才执行重写
+            if self.capabilities.rewrite_presigned_host and self.public_base_url and 'url' in policy_data:
+                logger.debug("[S3 Driver] Attempting to rewrite POST URL with public_base_url...")
+                try:
+                    original_parts = urlparse(policy_data['url'])
+                    public_parts = urlparse(self.public_base_url)
 
-            logger.debug(f"[S3 Driver] Generated presigned POST policy for {object_name}: {policy_data}")
+                    # 构建新 URL：
+                    #   - scheme (http/https) 来自 public_base_url
+                    #   - netloc (域名)       来自 public_base_url
+                    #   - path (路径, e.g., "/" 或 "/bucket-name/") 来自 Boto3 的 URL
+                    new_parts = (
+                        public_parts.scheme,  # e.g., "https"
+                        public_parts.netloc,  # e.g., "r2.rgcdev.top"
+                        original_parts.path,  # e.g., "/" (for R2) OR "/public-assets-bucket/" (for MinIO)
+                        original_parts.params,
+                        original_parts.query,
+                        original_parts.fragment
+                    )
+
+                    policy_data['url'] = urlunparse(new_parts)
+                    logger.debug(f"[S3 Driver] Rewrote POST URL to public_base_url: {policy_data['url']}")
+
+                except Exception as e:
+                    logger.error(f"[S3 Driver] Failed to parse and rewrite POST URL: {e}")
+                    # 不抛出异常，只记录日志，最坏情况是使用 Boto3 生成的内网 URL
+
+            logger.debug(f"[S3 Driver] Generated presigned POST policy for {object_name}.")
             return policy_data
+
         except ClientError as e:
+            # 【修改】为 R2 提供更明确的错误信息
+            # R2 不支持 POST，Boto3 会抛出 "InvalidRequest" 或类似错误
+            if "not implemented" in str(e).lower() or "InvalidRequest" in str(e):
+                logger.error(
+                    f"Failed to generate POST policy. Does '{self.s3_conf.endpoint}' support POST policies? (e.g., R2 does not): {e}")
+                raise NotImplementedError(
+                    "This storage client does not support presigned POST policies (e.g., R2)."
+                )
+
             logger.error(f"Failed to generate presigned POST policy for {object_name}: {e}")
             raise FileException("Could not generate upload policy.")
 

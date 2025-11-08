@@ -9,9 +9,13 @@ from app.api.dependencies.service_getters.common_service_getter import get_file_
 from app.core.exceptions import BaseBusinessException
 from app.schemas.common.api_response import StandardResponse, response_success, response_error
 from app.schemas.file.file_record_schemas import FileRecordRead, MoveFilePayload, FileInfo
-from app.schemas.file.file_schemas import (  # 导入我们为返回值定义的 Pydantic 模型
+from app.schemas.file.file_schemas import (
     UploadResult,
-    PresignedUploadURL, RegisterFilePayload, PresignedUploadPolicy, PresignedPolicyPayload
+    UnifiedPresignedUpload,  # <-- 导入新的统一响应模型
+    RegisterFilePayload,
+    PresignedPolicyPayload,   # <-- 我们将复用这个作为新端点的输入
+    PresignedUploadURL,     # (不再由 router 直接返回)
+    PresignedUploadPolicy,  # (不再由 router 直接返回)
 )
 from app.schemas.users.user_context import UserContext
 from app.services.file.file_record_service import FileRecordService
@@ -146,6 +150,37 @@ async def get_presigned_download_url_by_profile(
 
 
 @router.post(
+    "/presigned-url/generate",  # <-- 【修改】使用新的统一路径
+    response_model=StandardResponse[UnifiedPresignedUpload],  # <-- 【修改】使用新的统一响应
+    summary="【推荐】智能生成预签名上传 (PUT或POST)",
+    dependencies=[Depends(require_verified_user)]
+)
+async def generate_unified_presigned_upload(
+    payload: PresignedPolicyPayload,  # <-- 【复用】这个 payload 完美适用，它包含 content_type
+    file_service: FileService = Depends(get_file_service),
+):
+    """
+    智能生成预签名上传凭证 (PUT或POST)。
+
+    这是所有客户端（前端）推荐使用的唯一端点。
+
+    它会根据后端的 Profile 配置 (业务偏好) 和 Client 配置 (能力)
+    自动决定是返回 PUT 还是 POST 凭证。
+
+    如果 Profile 偏好 "post_policy" 但 Client (如 R2) 不支持,
+    它会自动降级并返回 "put_url" 凭证。
+    """
+    # 【修改】调用我们新的、智能的 service 方法
+    result = await file_service.generate_presigned_upload(
+        profile_name=payload.profile_name,
+        original_filename=payload.original_filename,
+        content_type=payload.content_type,
+        expires_in=payload.expires_in,
+        **payload.path_params
+    )
+    return response_success(data=result, message="凭证生成成功。")
+
+@router.post(
     "/presigned-url/put",
     response_model=StandardResponse[PresignedUploadURL],
     summary="按 Profile 生成用于上传的预签名 URL"
@@ -192,6 +227,7 @@ async def generate_presigned_upload_policy_by_profile(
         **payload.path_params
     )
     return response_success(data=result)
+
 @router.get(
     "/files",
     response_model=StandardResponse[List[FileInfo]],

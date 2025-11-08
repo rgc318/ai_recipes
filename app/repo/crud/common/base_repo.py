@@ -57,9 +57,9 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], Rep
         """回滚当前数据库会话中的所有更改。"""
         await self.db.rollback()
 
-    async def refresh(self, obj: ModelType):
+    async def refresh(self, obj: ModelType, **kwargs):
         """用数据库中的最新状态刷新一个ORM对象。"""
-        await self.db.refresh(obj)
+        await self.db.refresh(obj, **kwargs)
 
     async def flush(self):
         """将当前会话中的变更刷入数据库，但不提交事务。"""
