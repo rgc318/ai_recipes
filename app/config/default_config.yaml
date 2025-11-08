@@ -47,6 +47,8 @@ storage_clients:
       secret_key: "${MINIO_SECRET}"
       bucket_name: "${PRIVATE_STORAGE_BUCKET}"
       secure: ${PRIVATE_STORAGE_SECURE}
+      capabilities: # <--- ADDED
+        path_style: "path"
 
   public_cloud_storage:
     type: "minio"
@@ -56,17 +58,60 @@ storage_clients:
       secret_key: "${MINIO_SECRET}"
       bucket_name: "${PUBLIC_STORAGE_BUCKET}"
       secure: ${PUBLIC_STORAGE_SECURE}
+      secure_cdn: ${PUBLIC_STORAGE_SECURE_CDN}
       public_endpoint: "${PUBLIC_STORAGE_PUBLIC_ENDPOINT}"
+      capabilities: # <--- ADDED
+        path_style: "path"
+        rewrite_presigned_host: true
+        supports_cdn_rewrite: true
+
+  r2_test_storage:
+    type: "s3"
+    params:
+      endpoint: "3fe4d9c093fe77e5877f03447e4f349d.r2.cloudflarestorage.com"
+      access_key: "${R2_ACCESS_KEY}"
+      secret_key: "${R2_SECRET_KEY}"
+      bucket_name: "test"
+      secure: true
+      region: "auto"
+
+      # force_path_style: false  # <--- REMOVED (已被 capabilities.path_style 取代)
+
+      # 【关键】R2 不支持 ACL, 必须设为 null
+      default_acl: null
+
+      public_endpoint: "r2.rgcdev.top"
+      secure_cdn: true
+
+      # 【关键】在这里显式地“覆盖” R2 的能力，使其与默认值（S3/MinIO）不同
+      capabilities: # <--- ADDED
+        # 我们明确地从列表中移除了 "post_policy"
+        upload_modes:
+          - "put_url"
+          - "multipart"
+
+        # 明确说明 R2 不支持 ACL
+        supports_acl: False
+
+        # R2 必须使用虚拟主机寻址（virtual-hosted style）
+        path_style: "virtual"
+
+        rewrite_presigned_host: false
+
+        supports_cdn_rewrite: true
 
 storage_profiles:
   user_avatars:
-    client: "public_cloud_storage"
+    client: "r2_test_storage"
+#    client: "public_cloud_storage"
     default_folder: "avatars/{user_id}"
     max_file_size_mb: 5
     allowed_file_types:
       - "image/jpeg"
       - "image/png"
       - "image/webp"
+    presigned_upload_method: "put_url" # <--- ADDED
+#    presigned_upload_method: "post_policy" # <--- ADDED
 
   secure_reports:
     client: "private_minio"
@@ -77,18 +122,24 @@ storage_profiles:
       - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       - "application/vnd.ms-excel"
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    presigned_upload_method: "put_url" # <--- ADDED
+#    presigned_upload_method: "post_policy" # <--- ADDED
 
   recipe_images:
     client: "r2_test_storage"
+#    client: "public_cloud_storage"
     default_folder: "recipes/{recipe_id}"
     max_file_size_mb: 5
     allowed_file_types:
       - "image/jpeg"
       - "image/png"
       - "image/webp"
+#    presigned_upload_method: "post_policy" # <--- ADDED
+    presigned_upload_method: "put_url" # <--- ADDED
 
   general_files:
-    client: "public_cloud_storage"
+    client: "r2_test_storage"
+#    client: "public_cloud_storage"
     default_folder: "general/{year}/{month}"
     allowed_file_types:
       - "image/jpeg"
@@ -112,3 +163,5 @@ storage_profiles:
       - "audio/wav"
       - "video/mp4"
       - "video/quicktime"
+    presigned_upload_method: "put_url" # <--- ADDED
+#    presigned_upload_method: "post_policy" # <--- ADDED
