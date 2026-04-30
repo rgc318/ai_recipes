@@ -5,7 +5,7 @@ import os
 # 从环境变量或默认值获取端口
 PORT = int(os.getenv("PORT", 8000))
 HOST = "localhost"
-PATH = "/auth/health" # 与你的实际健康检查端点保持一致
+PATH = os.getenv("HEALTHCHECK_PATH", "/api/v1/auth/health")
 
 try:
     # 使用 Python 内置的 http.client，无需任何第三方依赖

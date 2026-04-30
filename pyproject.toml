@@ -4,7 +4,7 @@
 name = "ai-recipes"
 version = "0.1.0"
 description = "AI-driven recipe management system"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 
 # 主要依赖
 dependencies = [
@@ -50,7 +50,9 @@ dependencies = [
 # 专门存放开发工具的依赖组
 [project.optional-dependencies]
 dev = [
-    "deptry>=0.17.0"
+    "deptry>=0.17.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 # 配置 deptry 忽略误报
@@ -63,4 +65,13 @@ ignore_obsolete = [
     "email-validator",
     "python-multipart",
     "psycopg2-binary",  # 如果你确实不再用 psycopg2，可以从这里移除
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "integration: tests that touch external services or application lifespan",
+    "contract: API and route contract tests",
+    "security: authentication and authorization regression tests",
 ]
