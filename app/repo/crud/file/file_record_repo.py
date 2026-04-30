@@ -153,30 +153,36 @@ class FileRecordRepository(BaseRepository[FileRecord, FileRecordCreate, FileReco
         if group_by and not hasattr(self.model, group_by):
             raise ValueError(f"Invalid group_by field: {group_by}")
 
-        # <-- [MODIFIED] 将 view_mode 传递给 _base_stmt
-        base_stmt = self._base_stmt(view_mode=view_mode)
+        base_records = self._base_stmt(view_mode=view_mode).subquery()
 
         if group_by:
-            group_by_col = getattr(self.model, group_by)
+            group_by_col = getattr(base_records.c, group_by)
             stmt = (
                 select(
                     group_by_col.label("group_key"),
-                    func.count(self.model.id).label("total_files"),
-                    func.sum(self.model.file_size_bytes).label("total_size_bytes")
+                    func.count(base_records.c.id).label("total_files"),
+                    func.coalesce(func.sum(base_records.c.file_size), 0).label("total_size_bytes")
                 )
-                .select_from(base_stmt.subquery()) # 使用 subquery 保证过滤先生效
+                .select_from(base_records)
                 .group_by(group_by_col)
                 .order_by(literal_column("total_size_bytes").desc())
             )
             results = await self.db.execute(stmt)
-            return [StorageUsageStats(group_key=str(r.group_key), **r._asdict()) for r in results.all()]
+            return [
+                StorageUsageStats(
+                    group_key=str(row.group_key),
+                    total_files=row.total_files,
+                    total_size_bytes=row.total_size_bytes,
+                )
+                for row in results.all()
+            ]
         else:
             stmt = select(
-                func.count(self.model.id).label("total_files"),
-                func.sum(self.model.file_size_bytes).label("total_size_bytes")
-            ).select_from(base_stmt.subquery())
+                func.count(base_records.c.id).label("total_files"),
+                func.coalesce(func.sum(base_records.c.file_size), 0).label("total_size_bytes")
+            ).select_from(base_records)
 
-            result = await self.db.execute(stmt).one_or_none()
+            result = (await self.db.execute(stmt)).one_or_none()
             if result and result.total_files > 0:
                 return StorageUsageStats(total_files=result.total_files, total_size_bytes=result.total_size_bytes)
             return StorageUsageStats(total_files=0, total_size_bytes=0)

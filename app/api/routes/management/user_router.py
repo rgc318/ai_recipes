@@ -66,13 +66,7 @@ async def get_user_info(
     current_user: UserRead = Depends(get_current_user),
     service: UserService = Depends(get_user_service),
 ):
-    user = await service.get_user_by_id(current_user.id)
-    if not user:
-        return response_error(
-            code=ResponseCodeEnum.USER_NOT_FOUND,
-            message="用户不存在",
-        )
-    return response_success(data=UserRead.model_validate(user), message="获取用户信息成功")
+    return response_success(data=current_user, message="获取用户信息成功")
 
 # ==========================
 # 🙋 用户自服务接口 (Self-Service)

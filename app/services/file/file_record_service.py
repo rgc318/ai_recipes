@@ -193,6 +193,12 @@ class FileRecordService(BaseService):
             total_pages=paged_records.total_pages
         )
 
+    async def get_storage_stats(self, group_by: Optional[str] = None):
+        """
+        获取文件存储统计数据。
+        """
+        return await self.file_repo.get_storage_usage_stats(group_by=group_by)
+
     async def register_uploaded_file(
             self, object_name: str, original_filename: str, content_type: str, file_size: int,
             profile_name: str, uploader_context: UserContext, etag: Optional[str] = None
