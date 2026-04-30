@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.middleware import RequestScopeMiddleware
 from app.core.security.middleware import AuditMiddleware
+from app.core.security.security import get_current_user
 from app.infra.db.repository_factory_auto import RepositoryFactory
 from app.infra.db.session import create_db_and_tables, get_session
 from contextlib import asynccontextmanager
@@ -13,6 +14,7 @@ from app.core.exceptions import BaseBusinessException, UnauthorizedException
 from app.enums.response_codes import ResponseCodeEnum
 from app.config.settings import settings
 from app.infra.redis.redis_factory import redis_factory
+from app.schemas.users.user_context import UserContext
 from app.services.users.permission_service import PermissionService
 
 
@@ -58,6 +60,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AI Recipe Project", lifespan=lifespan)
+
+# 2. 定义一个“假用户”函数
+# 这个函数的参数要尽可能简单，因为它只是为了跳过验证
+async def get_mock_user():
+    logger.info("🛠️  当前处于开发模式：已启用 Mock 用户绕过身份验证")
+    return None
+
+
+app.dependency_overrides[get_current_user] = get_mock_user
 
 @app.exception_handler(BaseBusinessException)
 async def business_exception_handler(request: Request, exc: BaseBusinessException):
