@@ -57,8 +57,11 @@ More detail: [Configuration Reference](configuration.md).
 
 ```bash
 ENV=test uv run --python /usr/bin/python3 pytest -q
+ENV=test uv run --python /usr/bin/python3 pytest -q -m integration
 ENV=dev uv run --python /usr/bin/python3 python -c "from app.main import app; print(len(app.routes))"
 ```
+
+Default tests exclude integration checks. Run `pytest -m integration` when you need to verify real login, Redis-backed token operations, app lifespan, and endpoint smoke tests against the configured external services.
 
 ## Local Services Used In This Environment
 

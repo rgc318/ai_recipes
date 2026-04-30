@@ -51,15 +51,17 @@ Real `.env` files are intentionally ignored by Git. Use `.env.example` as the te
 
 ```bash
 ENV=test uv run --python /usr/bin/python3 pytest -q
+ENV=test uv run --python /usr/bin/python3 pytest -q -m integration
 ```
 
 Current baseline:
 
 ```text
-7 passed, 3 xfailed
+pytest: 108 passed, 120 deselected
+pytest -m integration: 120 passed, 108 deselected
 ```
 
-The xfailed tests record known auth and route-registration issues.
+Default tests exclude integration checks. Integration tests use the configured PostgreSQL, Redis, storage endpoints, and `TEST_AUTH_USERNAME` / `TEST_AUTH_PASSWORD`.
 
 ## Documentation
 

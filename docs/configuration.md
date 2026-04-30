@@ -49,6 +49,8 @@ If `ENV` is not set, the code defaults to `config`, which loads `app/config/conf
 | `PUBLIC_STORAGE_PUBLIC_ENDPOINT` | Public/CDN endpoint |
 | `R2_ACCESS_KEY` | Cloudflare R2 access key |
 | `R2_SECRET_KEY` | Cloudflare R2 secret |
+| `TEST_AUTH_USERNAME` | Optional integration-test login username |
+| `TEST_AUTH_PASSWORD` | Optional integration-test login password |
 
 Use `.env.example` as a non-secret template.
 
@@ -80,4 +82,4 @@ Business profiles map file operations to storage clients:
 
 The application validates JWT issuer, audience, token type, and user status in `app/core/security/security.py`.
 
-Current caveat: `app/main.py` globally overrides `get_current_user` with a mock that returns `None`. This should be removed or scoped to tests before relying on production authorization behavior.
+Test-only auth overrides live in pytest fixtures. The application entrypoint does not globally bypass `get_current_user`.

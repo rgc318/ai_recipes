@@ -151,7 +151,7 @@ Interactive documentation:
 | POST | `/api/v1/permission/sync-from-payload` | Sync permissions from request body |
 | DELETE | `/api/v1/permission/permanent` | Permanent delete |
 
-Note: `POST /api/v1/permission/sync-from-source` is currently registered twice in code.
+Permission routes are covered by route inventory and duplicate-route contract tests.
 
 ## Files
 

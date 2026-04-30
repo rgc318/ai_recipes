@@ -105,15 +105,11 @@ Current auth behavior has known defects:
 
 See `docs/auth-and-permissions.md`.
 
-### Duplicate OpenAPI Operation ID Warning
+### Route And OpenAPI Drift
 
-The permission router registers:
+Route inventory, duplicate route detection, route order, and OpenAPI operation ID uniqueness are covered by contract tests.
 
-```text
-POST /api/v1/permission/sync-from-source
-```
-
-twice. This is tracked by an `xfail` route contract test.
+If an endpoint is intentionally added, removed, renamed, or changes public/protected status, update `tests/contract/test_endpoint_inventory.py` in the same change.
 
 ## Logs
 

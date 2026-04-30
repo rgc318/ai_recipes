@@ -12,6 +12,16 @@ The test suite is split by purpose:
 
 Default `pytest` runs the fast baseline and does not require external services. Integration tests are excluded by default.
 
+Current verified baseline:
+
+```text
+pytest
+108 passed, 120 deselected
+
+pytest -m integration
+120 passed, 108 deselected
+```
+
 `contract/test_endpoint_inventory.py` keeps an explicit inventory of every registered `/api/v1` endpoint and every endpoint that OpenAPI currently exposes without an auth scheme. When a route is added, removed, renamed, or changes public/protected status, update that inventory intentionally in the same change.
 
 Use markers for focused runs:
@@ -30,3 +40,12 @@ TEST_AUTH_USERNAME=vben TEST_AUTH_PASSWORD=... pytest -m integration
 ```
 
 The `integration_auth_state` fixture logs in once per pytest session and caches the access token plus refresh cookie on the shared integration client.
+
+Broad endpoint coverage:
+
+- `contract/test_endpoint_inventory.py`: all registered `/api/v1` routes and public OpenAPI endpoints.
+- `security/test_protected_endpoint_contracts.py`: anonymous access behavior for protected endpoints.
+- `contract/test_public_endpoint_smoke.py`: public endpoint smoke coverage in integration mode.
+- `integration/test_authenticated_endpoint_smoke.py`: authenticated protected endpoint smoke coverage.
+- `integration/test_auth_flow.py`: login, refresh, and logout behavior.
+- `unit/test_permission_dependencies.py`: permission dependency matrix.

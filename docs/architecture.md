@@ -43,9 +43,8 @@ See domain-specific documents:
 
 ## Known Technical Debt
 
-- `app/main.py` currently overrides `get_current_user` globally with a mock user returning `None`.
-- `POST /api/v1/permission/sync-from-source` is registered twice.
 - Some admin route dependencies are commented out or incomplete.
-- Tests currently include `xfail` guards for these known issues.
+- Some OpenAPI-public endpoints still need security-design review.
+- Integration tests currently depend on real external services and a real test account.
 - Permission config currently contains five permission definitions in `PERMISSIONS_CONFIG`; startup sync reports that count.
 - `app/main.py` logs all routes at import time, which makes test and startup output noisy.

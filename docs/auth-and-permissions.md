@@ -87,16 +87,19 @@ Common dependencies in `app/api/dependencies/permissions.py`:
 - `require_role(...)`
 - `require_permission(...)`
 
-## Known Issues
+## Current Test Coverage
 
-These are tracked in tests with `xfail`:
+The test suite currently covers:
 
-- `app/main.py` globally overrides `get_current_user` with a mock user returning `None`.
-- Anonymous requests to some protected endpoints can return `200` or `500` instead of `401/403`.
-- Some admin route dependencies are commented out in recipe/tag/ingredient modules.
-- `POST /api/v1/permission/sync-from-source` is registered twice.
+- Anonymous requests to protected endpoints.
+- Invalid bearer token rejection.
+- Authenticated protected endpoint smoke checks.
+- Login, refresh token, and logout flows.
+- Permission dependency matrix for login, superuser, verified user, role, and permission checks.
 
-Before production hardening, remove the global auth override and enforce a clear permission matrix for each route group.
+Test-only auth overrides live in pytest fixtures. `app/main.py` does not globally bypass `get_current_user`.
+
+Remaining hardening work is to define and enforce a clear permission matrix for each route group at the interface level.
 
 ## Recommended Permission Matrix
 
