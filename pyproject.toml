@@ -70,7 +70,9 @@ ignore_obsolete = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
 markers = [
+    "unit: isolated tests for pure functions and helpers",
     "integration: tests that touch external services or application lifespan",
     "contract: API and route contract tests",
     "security: authentication and authorization regression tests",

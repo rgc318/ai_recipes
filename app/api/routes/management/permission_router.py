@@ -155,6 +155,24 @@ async def list_permissions_paginated(
 #     return response_success(data=sync_result, message="权限同步完成")
 
 
+@router.post(
+    "/sync-from-payload",
+    response_model=StandardResponse[PermissionSyncResponse],
+    summary="【前端驱动模式】根据请求体内容同步权限"
+)
+async def sync_permissions_from_payload(
+    permissions_data: List[Dict[str, Any]],
+    service: PermissionService = Depends(get_permission_service)
+):
+    """
+    从请求体 (payload) 中接收一个权限列表，并与数据库同步。
+    这个接口提供了极大的灵活性，允许任何客户端提供权限定义源。
+    - **需要超级管理员权限。**
+    """
+    sync_result = await service.sync_permissions(permissions_data)
+    return response_success(data=sync_result, message="权限已从请求体同步完成")
+
+
 @router.get(
     "/{permission_id}",
     response_model=StandardResponse[PermissionRead],
@@ -214,38 +232,3 @@ async def delete_permission(
     """
     await service.delete_permission(permission_id)
     # 对于 DELETE 成功操作，规范是返回 204 No Content，表示成功但无内容返回
-
-
-@router.post(
-    "/sync-from-source", # 新路径，更明确
-    response_model=StandardResponse[PermissionSyncResponse],
-    summary="【后端中心模式】从服务器配置文件同步权限"
-)
-async def sync_permissions_from_source(
-    service: PermissionService = Depends(get_permission_service)
-):
-    """
-    触发一次从后端配置文件 (permissions_enum.py) 到数据库的权限同步。
-    这是推荐的、更安全的自动化同步方式。
-    - **需要超级管理员权限。**
-    """
-    sync_result = await service.sync_permissions_from_source()
-    return response_success(data=sync_result, message="权限已从后端源文件同步完成")
-
-
-@router.post(
-    "/sync-from-payload", # 修改路径，使其职责更清晰
-    response_model=StandardResponse[PermissionSyncResponse],
-    summary="【前端驱动模式】根据请求体内容同步权限"
-)
-async def sync_permissions_from_payload(
-    permissions_data: List[Dict[str, Any]],
-    service: PermissionService = Depends(get_permission_service)
-):
-    """
-    从请求体 (payload) 中接收一个权限列表，并与数据库同步。
-    这个接口提供了极大的灵活性，允许任何客户端提供权限定义源。
-    - **需要超级管理员权限。**
-    """
-    sync_result = await service.sync_permissions(permissions_data)
-    return response_success(data=sync_result, message="权限已从请求体同步完成")

@@ -28,11 +28,6 @@ def test_removed_legacy_routes_are_not_registered(route_map: set[tuple[str, str]
 
     assert route_map.isdisjoint(legacy_routes)
 
-
-import pytest
-
-
-@pytest.mark.xfail(reason="permission_router registers POST /permission/sync-from-source twice.")
 def test_no_duplicate_method_path_routes(app):
     seen: set[tuple[str, str]] = set()
     duplicates: set[tuple[str, str]] = set()
@@ -49,3 +44,41 @@ def test_no_duplicate_method_path_routes(app):
             seen.add(key)
 
     assert duplicates == set()
+
+
+def test_static_routes_are_registered_before_matching_dynamic_routes(app):
+    api_routes = [
+        route
+        for route in app.routes
+        if getattr(route, "path", "").startswith("/api/v1/")
+        and getattr(route, "methods", None)
+    ]
+    violations: list[str] = []
+
+    for index, route in enumerate(api_routes):
+        dynamic_path = route.path
+        if "{" not in dynamic_path:
+            continue
+
+        dynamic_segments = dynamic_path.strip("/").split("/")
+        for later_route in api_routes[index + 1:]:
+            static_path = later_route.path
+            if "{" in static_path:
+                continue
+            if not route.methods.intersection(later_route.methods):
+                continue
+
+            static_segments = static_path.strip("/").split("/")
+            if len(dynamic_segments) != len(static_segments):
+                continue
+
+            matches = all(
+                dynamic_segment.startswith("{") and dynamic_segment.endswith("}")
+                or dynamic_segment == static_segment
+                for dynamic_segment, static_segment in zip(dynamic_segments, static_segments)
+            )
+            if matches:
+                methods = sorted(route.methods.intersection(later_route.methods))
+                violations.append(f"{methods} {dynamic_path} before {static_path}")
+
+    assert violations == []

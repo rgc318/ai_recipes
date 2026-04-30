@@ -24,9 +24,10 @@ def _apply_cookie_modifications(
     # 设置新的 cookies
     if set_cookies:
         for cookie_params in set_cookies:
-            cookie_key = cookie_params.pop('key', None)
+            params = cookie_params.copy()
+            cookie_key = params.pop('key', None)
             if cookie_key is not None:
-                response.set_cookie(key=cookie_key, **cookie_params)
+                response.set_cookie(key=cookie_key, **params)
 
     # 删除指定的 cookies
     if delete_cookies:
@@ -53,7 +54,7 @@ class StandardResponse(BaseModel, Generic[T]):
 # === 自动序列化工具 ===
 def to_json_compatible(data: Any) -> Any:
     if isinstance(data, BaseModel):
-        return data.dict()
+        return data.model_dump()
 
     if isinstance(data, list):
         return [to_json_compatible(item) for item in data]
@@ -62,7 +63,7 @@ def to_json_compatible(data: Any) -> Any:
         # ORM 实例 -> dict（需用户实现 __pydantic_model__）
         model = getattr(data.__class__, "__pydantic_model__", None)
         if model:
-            return model.from_orm(data).dict()
+            return model.from_orm(data).model_dump()
         else:
             return str(data)  # 或 raise 更明确
 
